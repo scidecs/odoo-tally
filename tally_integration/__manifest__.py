@@ -20,8 +20,8 @@ and Odoo 19 (Odoo.sh / On-Premise). Tally is the default source of truth, config
 """,
     "version": "19.0.1.0.0",
     "category": "Accounting",
-    "author": "Sendan / Scidecs",
-    "website": "https://scidecs.com",
+    "author": "Scidecs",
+    "website": "https://www.scidecs.com",
     "license": "LGPL-3",
     "depends": ["base", "mail", "account", "uom", "product", "stock", "analytic"],
     "data": [

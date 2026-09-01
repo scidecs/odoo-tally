@@ -45,7 +45,7 @@ class AccountAccount(models.Model):
         try:
             if not self.name:
                 return
-            company = self.company_id or self.env.company
+            company = getattr(self, "company_id", None) or (getattr(self, "company_ids", None) and self.company_ids[0]) or self.env.company
             instance = self.env["tally.instance"].search(
                 [("company_id", "=", company.id), ("active", "=", True)], limit=1)
             if not instance:
