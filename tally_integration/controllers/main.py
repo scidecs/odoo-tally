@@ -21,7 +21,7 @@ class TallyAgentController(http.Controller):
         return request.env["tally.instance"].sudo().search(
             [("agent_token", "=", token)], limit=1) or None
 
-    @http.route("/tally/agent/heartbeat", type="json", auth="public",
+    @http.route("/tally/agent/heartbeat", type="jsonrpc", auth="public",
                 methods=["POST"], csrf=False)
     def heartbeat(self, **kw):
         instance = self._authenticate()
@@ -30,7 +30,7 @@ class TallyAgentController(http.Controller):
         instance.write({"agent_last_seen": fields.Datetime.now(), "state": "online"})
         return {"ok": True, "poll_interval": instance.poll_interval}
 
-    @http.route("/tally/agent/companies", type="json", auth="public",
+    @http.route("/tally/agent/companies", type="jsonrpc", auth="public",
                 methods=["POST"], csrf=False)
     def companies(self, companies=None, **kw):
         """Agent reports the Tally company files it can currently see."""
@@ -47,7 +47,7 @@ class TallyAgentController(http.Controller):
                 Disc.create({"name": name, "last_seen": now})
         return {"ok": True, "count": len(companies or [])}
 
-    @http.route("/tally/agent/pull", type="json", auth="public",
+    @http.route("/tally/agent/pull", type="jsonrpc", auth="public",
                 methods=["POST"], csrf=False)
     def pull(self, limit=50, **kw):
         """Agent pulls pending outbound (Odoo -> Tally) work."""
@@ -65,7 +65,7 @@ class TallyAgentController(http.Controller):
             "payload": item.payload,
         } for item in items]}
 
-    @http.route("/tally/agent/push", type="json", auth="public",
+    @http.route("/tally/agent/push", type="jsonrpc", auth="public",
                 methods=["POST"], csrf=False)
     def push(self, entity=None, alterid=None, records=None, xml_payload=None, **kw):
         """Agent pushes Tally -> Odoo deltas (as structured records or raw XML)."""
@@ -106,7 +106,7 @@ class TallyAgentController(http.Controller):
             "watermark": result.get("watermark", 0),
         }
 
-    @http.route("/tally/agent/ack", type="json", auth="public",
+    @http.route("/tally/agent/ack", type="jsonrpc", auth="public",
                 methods=["POST"], csrf=False)
     def ack(self, results=None, **kw):
         """Agent acknowledges outbound items it wrote into Tally."""

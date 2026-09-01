@@ -35,7 +35,7 @@ def compute_payload_hash(data):
 
 class SyncEngine:
     def __init__(self, env, instance):
-        self.env = env
+        self.env = env(context=dict(env.context, tally_sync_origin="tally", tally_no_sync=True))
         self.instance = instance
         self.company = instance.company_id
 
@@ -66,8 +66,18 @@ class SyncEngine:
     # INBOUND DISPATCHER (Tally -> Odoo)
     # =========================================================================
 
+    VOUCHER_ENTITIES = {
+        "sales", "credit_note", "purchase", "debit_note", "receipt",
+        "payment", "journal", "contra", "opening_balance", "stock_journal",
+    }
+
     def process_inbound_batch(self, entity, records, alterid=None):
         """Main entry point for processing a batch of records from Tally."""
+        if getattr(self.instance, "odoo_role", "full") == "operational" and entity in self.VOUCHER_ENTITIES:
+            self.env["tally.sync.log"].log(
+                self.instance, "tally_to_odoo", entity, "warning",
+                "Odoo is operational-only (Tally keeps the books); inbound voucher import skipped.")
+            return {"processed": 0, "skipped": len(records), "status": "operational_skip"}
         if not self.is_inbound_allowed(entity):
             self.env["tally.sync.log"].log(
                 self.instance, "tally_to_odoo", entity, "warning",
@@ -118,27 +128,31 @@ class SyncEngine:
                 continue
 
             try:
-                odoo_record = handler(rec)
-                if odoo_record:
-                    processed += 1
-                    self._update_mapping(
-                        entity=entity,
-                        guid=guid or f"tally_{entity}_{odoo_record.id}",
-                        masterid=rec.get("alterid"),
-                        model_name=odoo_record._name,
-                        res_id=odoo_record.id,
-                        content_hash=p_hash,
-                        origin="tally",
-                    )
+                with self.env.cr.savepoint():
+                    odoo_record = handler(rec)
+                    if odoo_record:
+                        processed += 1
+                        self._update_mapping(
+                            entity=entity,
+                            guid=guid or f"tally_{entity}_{odoo_record.id}",
+                            masterid=rec.get("alterid"),
+                            model_name=odoo_record._name,
+                            res_id=odoo_record.id,
+                            content_hash=p_hash,
+                            origin="tally",
+                        )
             except Exception as e:
                 errors += 1
                 _logger.exception("Error upserting %s: %s", entity, e)
-                self.env["tally.sync.log"].log(
-                    self.instance, "tally_to_odoo", entity, "error",
-                    f"Failed upserting {entity} {rec.get('name') or rec.get('voucher_number')}: {str(e)}",
-                    detail=str(rec),
-                    tally_guid=guid,
-                )
+                try:
+                    self.env["tally.sync.log"].log(
+                        self.instance, "tally_to_odoo", entity, "error",
+                        f"Failed upserting {entity} {rec.get('name') or rec.get('voucher_number')}: {str(e)}",
+                        detail=str(rec),
+                        tally_guid=guid,
+                    )
+                except Exception:
+                    pass
 
         # Advance AlterID watermark
         cfg = self.get_entity_config(entity)
@@ -203,19 +217,17 @@ class SyncEngine:
         Account = self.env["account.account"]
 
         # Search existing by name/code
-        rec = Account.search([
-            ("name", "=", name),
-            ("company_id", "=", self.company.id)
-        ], limit=1)
+        domain = [("name", "=", name)] + self._account_company_domain()
+        rec = Account.search(domain, limit=1)
 
         # Map Tally parent group to Odoo account_type
         account_type = self._map_tally_group_to_account_type(parent)
 
         vals = {
             "name": name,
-            "company_id": self.company.id,
             "account_type": account_type,
         }
+        vals.update(self._account_company_vals())
 
         if rec:
             rec.write(vals)
@@ -283,6 +295,7 @@ class SyncEngine:
             rec.write(vals)
         else:
             rec = Partner.create(vals)
+        self._ensure_partner_accounts(rec)
         return rec
 
     def _upsert_uom(self, data):
@@ -293,8 +306,9 @@ class SyncEngine:
         Uom = self.env["uom.uom"]
         rec = Uom.search([("name", "=", name)], limit=1)
         if not rec:
-            # Get default Unit category
-            cat = self.env["uom.category"].search([], limit=1)
+            cat = self.env["uom.category"].search([("name", "=", name)], limit=1)
+            if not cat:
+                cat = self.env["uom.category"].create({"name": name})
             rec = Uom.create({
                 "name": name,
                 "category_id": cat.id,
@@ -336,15 +350,16 @@ class SyncEngine:
 
         vals = {
             "name": name,
-            "detailed_type": "product",
+            "type": "consu",
             "uom_id": uom.id if uom else False,
-            "uom_po_id": uom.id if uom else False,
             "standard_price": float(data.get("opening_rate") or 0.0),
             "company_id": self.company.id,
         }
 
+        if "is_storable" in Product._fields:
+            vals["is_storable"] = True
         # Check HSN code
-        if data.get("hsn_code") and hasattr(Product, "l10n_in_hsn_code"):
+        if data.get("hsn_code") and "l10n_in_hsn_code" in Product._fields:
             vals["l10n_in_hsn_code"] = data["hsn_code"]
 
         if rec:
@@ -465,6 +480,11 @@ class SyncEngine:
                 ("company_id", "=", self.company.id)
             ], limit=1)
 
+        # Determine default line account
+        default_acc_type = "income" if move_type in ("out_invoice", "out_refund") else "expense"
+        default_acc_name = "Sales Account" if default_acc_type == "income" else "Purchase Account"
+        default_account = self._get_or_create_account(default_acc_name, default_type=default_acc_type)
+
         # Prepare invoice lines
         lines = []
         inv_entries = data.get("inventory_entries", [])
@@ -473,6 +493,7 @@ class SyncEngine:
                 product = self._get_or_create_product(ie.get("item"))
                 lines.append((0, 0, {
                     "product_id": product.id if product else False,
+                    "account_id": default_account.id if default_account else False,
                     "name": ie.get("item") or "Item",
                     "quantity": float(ie.get("qty") or 1.0),
                     "price_unit": float(ie.get("rate") or abs(float(ie.get("amount") or 0.0))),
@@ -482,20 +503,17 @@ class SyncEngine:
             # Fallback to ledger entries if pure accounting invoice
             for le in data.get("ledger_entries", []):
                 if le.get("ledger") != partner_name:
-                    account = self._get_or_create_account(le.get("ledger"))
+                    account = self._get_or_create_account(le.get("ledger"), default_type=default_acc_type)
                     lines.append((0, 0, {
                         "name": le.get("ledger") or "Line",
-                        "account_id": account.id if account else False,
+                        "account_id": account.id if account else (default_account.id if default_account else False),
                         "quantity": 1,
                         "price_unit": abs(float(le.get("amount") or 0.0)),
                     }))
 
         # Default Journal
         journal_type = "sale" if move_type in ("out_invoice", "out_refund") else "purchase"
-        journal = self.env["account.journal"].search([
-            ("type", "=", journal_type),
-            ("company_id", "=", self.company.id)
-        ], limit=1)
+        journal = self._get_or_create_journal(journal_type)
 
         vals = {
             "move_type": move_type,
@@ -503,7 +521,7 @@ class SyncEngine:
             "invoice_date": date_str,
             "date": date_str,
             "ref": data.get("reference") or vch_num,
-            "narration": data.get("narration"),
+            "narration": f"<p>{data['narration']}</p>" if data.get("narration") else False,
             "company_id": self.company.id,
             "journal_id": journal.id if journal else False,
         }
@@ -538,10 +556,7 @@ class SyncEngine:
             if amt > total_amount:
                 total_amount = amt
 
-        journal = self.env["account.journal"].search([
-            ("type", "in", ("bank", "cash")),
-            ("company_id", "=", self.company.id)
-        ], limit=1)
+        journal = self._get_or_create_journal("bank")
 
         vals = {
             "payment_type": pay_type,
@@ -549,13 +564,13 @@ class SyncEngine:
             "partner_id": partner.id if partner else False,
             "amount": total_amount,
             "date": date_str,
-            "ref": vch_num,
+            "memo": vch_num,
             "journal_id": journal.id if journal else False,
             "company_id": self.company.id,
         }
 
         rec = Payment.search([
-            ("ref", "=", vch_num),
+            ("memo", "=", vch_num),
             ("payment_type", "=", pay_type),
             ("company_id", "=", self.company.id)
         ], limit=1)
@@ -585,16 +600,13 @@ class SyncEngine:
                 "credit": credit,
             }))
 
-        journal = self.env["account.journal"].search([
-            ("type", "=", "general"),
-            ("company_id", "=", self.company.id)
-        ], limit=1)
+        journal = self._get_or_create_journal("general")
 
         vals = {
             "move_type": "entry",
             "date": date_str,
             "ref": vch_num,
-            "narration": data.get("narration"),
+            "narration": f"<p>{data['narration']}</p>" if data.get("narration") else False,
             "journal_id": journal.id if journal else False,
             "company_id": self.company.id,
             "line_ids": lines,
@@ -653,7 +665,7 @@ class SyncEngine:
     def _map_tally_group_to_account_type(self, tally_group):
         """Find the mapped account_type from tally.account.type.map."""
         Map = self.env["tally.account.type.map"]
-        rec = Map.search([("tally_group_name", "=", tally_group)], limit=1)
+        rec = Map.search([("tally_group", "=ilike", tally_group)], limit=1)
         if rec:
             return rec.account_type
         # Fallbacks
@@ -686,15 +698,55 @@ class SyncEngine:
             "income": "400",
             "expense": "500",
         }
+    def _account_company_domain(self):
+        Account = self.env["account.account"]
+        if "company_ids" in Account._fields:
+            return [("company_ids", "in", [self.company.id])]
+        elif "company_id" in Account._fields:
+            return [("company_id", "in", (False, self.company.id))]
+        return []
+
+    def _account_company_vals(self):
+        Account = self.env["account.account"]
+        vals = {}
+        if "company_ids" in Account._fields:
+            vals["company_ids"] = [(4, self.company.id)]
+        elif "company_id" in Account._fields:
+            vals["company_id"] = self.company.id
+        return vals
+
+    def _generate_account_code(self, account_type):
+        """Generate next available account code based on type."""
+        prefix_map = {
+            "asset_receivable": "100",
+            "asset_cash": "101",
+            "asset_current": "102",
+            "liability_payable": "200",
+            "liability_current": "201",
+            "equity": "300",
+            "income": "400",
+            "expense": "500",
+        }
         prefix = prefix_map.get(account_type, "900")
         Account = self.env["account.account"]
-        last = Account.search([
-            ("code", "=like", f"{prefix}%"),
-            ("company_id", "=", self.company.id)
-        ], order="code desc", limit=1)
+        domain = [("code", "=like", f"{prefix}%")] + self._account_company_domain()
+        last = Account.search(domain, order="code desc", limit=1)
         if last and last.code.isdigit():
             return str(int(last.code) + 1)
         return f"{prefix}001"
+
+    def _ensure_partner_accounts(self, partner):
+        """Ensure partner has receivable and payable accounts set for invoice balance lines."""
+        Partner = self.env["res.partner"]
+        vals = {}
+        if "property_account_receivable_id" in Partner._fields and not partner.property_account_receivable_id:
+            rec_acc = self._get_or_create_account("Sundry Debtors", default_type="asset_receivable")
+            vals["property_account_receivable_id"] = rec_acc.id
+        if "property_account_payable_id" in Partner._fields and not partner.property_account_payable_id:
+            pay_acc = self._get_or_create_account("Sundry Creditors", default_type="liability_payable")
+            vals["property_account_payable_id"] = pay_acc.id
+        if vals:
+            partner.write(vals)
 
     def _get_or_create_partner(self, name, is_supplier=False):
         if not name:
@@ -708,6 +760,7 @@ class SyncEngine:
                 "customer_rank": 0 if is_supplier else 1,
                 "supplier_rank": 1 if is_supplier else 0,
             })
+        self._ensure_partner_accounts(p)
         return p
 
     def _get_or_create_product(self, name):
@@ -718,21 +771,50 @@ class SyncEngine:
         if not p:
             p = Product.create({
                 "name": name,
-                "detailed_type": "product",
+                "type": "consu",
                 "company_id": self.company.id,
             })
         return p
 
-    def _get_or_create_account(self, name):
+    def _get_or_create_account(self, name, default_type="expense"):
         if not name:
             return False
         Account = self.env["account.account"]
-        a = Account.search([("name", "=", name), ("company_id", "=", self.company.id)], limit=1)
+        domain = [("name", "=", name)] + self._account_company_domain()
+        a = Account.search(domain, limit=1)
         if not a:
-            a = Account.create({
+            vals = {
                 "name": name,
-                "code": self._generate_account_code("expense"),
-                "account_type": "expense",
+                "code": self._generate_account_code(default_type),
+                "account_type": default_type,
+            }
+            vals.update(self._account_company_vals())
+            a = Account.create(vals)
+        return a
+
+    def _get_or_create_journal(self, journal_type):
+        Journal = self.env["account.journal"]
+        j = Journal.search([
+            ("type", "=", journal_type),
+            ("company_id", "=", self.company.id)
+        ], limit=1)
+        if not j:
+            name_map = {
+                "sale": ("Customer Invoices", "INV"),
+                "purchase": ("Vendor Bills", "BILL"),
+                "general": ("Miscellaneous Operations", "MISC"),
+                "bank": ("Bank", "BNK"),
+                "cash": ("Cash", "CSH"),
+            }
+            name, code = name_map.get(journal_type, ("General Journal", "GEN"))
+            # ensure code is unique
+            cnt = Journal.search_count([("code", "=", code), ("company_id", "=", self.company.id)])
+            if cnt:
+                code = f"{code}{cnt+1}"
+            j = Journal.create({
+                "name": name,
+                "type": journal_type,
+                "code": code,
                 "company_id": self.company.id,
             })
-        return a
+        return j

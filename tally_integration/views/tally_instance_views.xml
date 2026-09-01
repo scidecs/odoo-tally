@@ -63,6 +63,9 @@
                             <field name="company_id" groups="base.group_multi_company"/>
                         </group>
                         <group string="Sync Policy">
+                            <field name="odoo_edition"/>
+                            <field name="odoo_role"/>
+                            <field name="tally_inventory"/>
                             <field name="default_source"/>
                             <field name="poll_interval"/>
                             <field name="queue_pending"/>
@@ -117,7 +120,7 @@
                 <field name="tally_company"/>
                 <filter string="Online" name="online" domain="[('state', '=', 'online')]"/>
                 <filter string="Offline" name="offline" domain="[('state', '=', 'offline')]"/>
-                <group expand="0" string="Group By">
+                <group>
                     <filter string="Source of Truth" name="grp_sot"
                             context="{'group_by': 'default_source'}"/>
                     <filter string="Status" name="grp_state" context="{'group_by': 'state'}"/>

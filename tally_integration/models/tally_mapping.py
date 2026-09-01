@@ -29,10 +29,10 @@ class TallyMapping(models.Model):
         [("active", "Active"), ("conflict", "Conflict"), ("error", "Error")],
         default="active", index=True)
 
-    _sql_constraints = [
-        ("guid_uniq", "unique(instance_id, entity, tally_guid)",
-         "This Tally GUID is already mapped for this entity."),
-    ]
+    _guid_uniq = models.Constraint(
+        "UNIQUE(instance_id, entity, tally_guid)",
+        "This Tally GUID is already mapped for this entity.",
+    )
 
     def action_open_odoo_record(self):
         self.ensure_one()

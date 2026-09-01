@@ -61,10 +61,11 @@
                 <field name="instance_id"/>
                 <filter string="Conflicts" name="conflicts" domain="[('state', '=', 'conflict')]"/>
                 <filter string="Errors" name="errors" domain="[('state', '=', 'error')]"/>
-                <group expand="0" string="Group By">
-                    <filter string="Entity" name="grp_entity" context="{'group_by': 'entity'}"/>
+                <group>
                     <filter string="Instance" name="grp_instance" context="{'group_by': 'instance_id'}"/>
+                    <filter string="Entity" name="grp_entity" context="{'group_by': 'entity'}"/>
                     <filter string="State" name="grp_state" context="{'group_by': 'state'}"/>
+                    <filter string="Last Origin" name="grp_origin" context="{'group_by': 'last_origin'}"/>
                 </group>
             </search>
         </field>

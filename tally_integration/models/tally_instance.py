@@ -40,6 +40,23 @@ class TallyInstance(models.Model):
         help="How often the on-prem agent polls Tally for AlterID changes.",
     )
 
+    # --- Odoo edition / deployment mode ---
+    odoo_edition = fields.Char(string="Odoo Edition", compute="_compute_odoo_edition")
+    odoo_role = fields.Selection(
+        [("full", "Odoo keeps the books (two-way)"),
+         ("operational", "Tally keeps the books (Odoo → Tally)")],
+        string="Odoo Role", required=True, tracking=True,
+        default=lambda self: self._default_odoo_role(),
+        help="Full: Odoo has accounting; two-way sync. Operational: Odoo is the front "
+             "office (sales/inventory) and Tally is the accounting system, so financial "
+             "data is pushed Odoo → Tally. Defaults to Operational on Odoo Community.")
+    tally_inventory = fields.Selection(
+        [("with_inventory", "Accounts with Inventory"),
+         ("accounts_only", "Accounts only")],
+        string="Tally Mode", default="with_inventory", required=True,
+        help="Match your Tally company. 'Accounts only' companies receive ledger-only "
+             "vouchers (no inventory entries).")
+
     # --- Onboarding / initial migration ---
     coa_mode = fields.Selection(
         [("import", "Import CoA from Tally"),
@@ -72,10 +89,10 @@ class TallyInstance(models.Model):
     log_count = fields.Integer(compute="_compute_counts")
     queue_pending = fields.Integer(compute="_compute_counts")
 
-    _sql_constraints = [
-        ("name_company_uniq", "unique(name, company_id)",
-         "Instance name must be unique per company."),
-    ]
+    _name_company_uniq = models.Constraint(
+        "UNIQUE(name, company_id)",
+        "Instance name must be unique per company.",
+    )
 
     def _compute_counts(self):
         mapping = self.env["tally.mapping"]
@@ -87,25 +104,61 @@ class TallyInstance(models.Model):
             rec.queue_pending = queue.search_count(
                 [("instance_id", "=", rec.id), ("state", "in", ("pending", "sent"))])
 
+    # ------------------------------------------------------------------ edition
+    @api.model
+    def _is_enterprise(self):
+        return bool(self.env["ir.module.module"].sudo().search_count(
+            [("name", "=", "account_accountant"), ("state", "=", "installed")]))
+
+    @api.model
+    def _default_odoo_role(self):
+        return "full" if self._is_enterprise() else "operational"
+
+    def _compute_odoo_edition(self):
+        edition = "Enterprise" if self._is_enterprise() else "Community"
+        for rec in self:
+            rec.odoo_edition = edition
+
     # ------------------------------------------------------------------ actions
     def action_generate_token(self):
         for rec in self:
             rec.agent_token = secrets.token_urlsafe(32)
         return True
 
+    # Entities Odoo pushes to Tally when it is operational-only (books in Tally).
+    OPERATIONAL_PUSH = {
+        "ledger", "stock_item", "uom", "stock_group", "godown", "cost_centre",
+        "sales", "credit_note", "purchase", "debit_note", "receipt", "payment",
+    }
+
     def action_load_default_entities(self):
-        """Seed the standard entity set (idempotent)."""
+        """Seed the standard entity set (idempotent), honouring the Odoo role.
+
+        In 'operational' mode (Odoo has no books, Tally is the accounting system)
+        the entities Odoo originates are pushed Odoo -> Tally, and pure accounting
+        entities (CoA, journals, opening balances) are seeded disabled.
+        """
         self.ensure_one()
+        operational = self.odoo_role == "operational"
         existing = set(self.entity_config_ids.mapped("entity"))
         commands = []
         for entity, model, sot, seq in DEFAULT_ENTITIES:
             if entity in existing:
                 continue
+            enabled = True
+            if operational:
+                if entity in self.OPERATIONAL_PUSH:
+                    sot, direction = "odoo", "odoo_to_tally"
+                else:
+                    direction, enabled = direction_for_source(sot), False
+            else:
+                direction = direction_for_source(sot)
             commands.append((0, 0, {
                 "entity": entity,
                 "odoo_model_name": model,
                 "source_of_truth": sot,
-                "direction": direction_for_source(sot),
+                "direction": direction,
+                "enabled": enabled,
                 "sequence": seq,
             }))
         if commands:

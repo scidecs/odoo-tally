@@ -57,7 +57,7 @@
                 <filter string="Warnings" name="warnings" domain="[('status', '=', 'warning')]"/>
                 <filter string="Tally → Odoo" name="t2o" domain="[('direction', '=', 'tally_to_odoo')]"/>
                 <filter string="Odoo → Tally" name="o2t" domain="[('direction', '=', 'odoo_to_tally')]"/>
-                <group expand="0" string="Group By">
+                <group>
                     <filter string="Status" name="grp_status" context="{'group_by': 'status'}"/>
                     <filter string="Entity" name="grp_entity" context="{'group_by': 'entity'}"/>
                     <filter string="Direction" name="grp_dir" context="{'group_by': 'direction'}"/>
