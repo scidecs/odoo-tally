@@ -216,9 +216,16 @@ class SyncEngine:
             return False
         Account = self.env["account.account"]
 
-        # Search existing by name/code
-        domain = [("name", "=", name)] + self._account_company_domain()
-        rec = Account.search(domain, limit=1)
+        # 1. Search existing by mapping GUID
+        rec = False
+        mapping = self._get_mapping("account_ledger", guid=data.get("guid"))
+        if mapping and mapping.odoo_res_id:
+            rec = Account.browse(mapping.odoo_res_id).exists()
+
+        # 2. Search existing by name/code scoped to company
+        if not rec:
+            domain = [("name", "=ilike", name)] + self._account_company_domain()
+            rec = Account.search(domain, limit=1)
 
         # Map Tally parent group to Odoo account_type
         account_type = self._map_tally_group_to_account_type(parent)
@@ -245,13 +252,19 @@ class SyncEngine:
             return False
         Partner = self.env["res.partner"]
 
-        # Search by GSTIN or Name
+        # 1. Search existing by mapping GUID
+        rec = False
+        mapping = self._get_mapping("ledger", guid=data.get("guid"))
+        if mapping and mapping.odoo_res_id:
+            rec = Partner.browse(mapping.odoo_res_id).exists()
+
+        # 2. Search by GSTIN (VAT) or Name
         gstin = data.get("gstin")
         domain = [("company_id", "in", (False, self.company.id))]
-        if gstin:
+        if not rec and gstin:
             rec = Partner.search(domain + [("vat", "=", gstin)], limit=1)
-        else:
-            rec = Partner.search(domain + [("name", "=", name)], limit=1)
+        if not rec:
+            rec = Partner.search(domain + [("name", "=ilike", name)], limit=1)
 
         parent = data.get("parent", "")
         is_customer = "debtor" in parent.lower() or "customer" in parent.lower()
@@ -338,10 +351,19 @@ class SyncEngine:
         if not name:
             return False
         Product = self.env["product.product"]
-        rec = Product.search([
-            ("name", "=", name),
-            ("company_id", "in", (False, self.company.id))
-        ], limit=1)
+
+        # 1. Search existing by mapping GUID
+        rec = False
+        mapping = self._get_mapping("stock_item", guid=data.get("guid"))
+        if mapping and mapping.odoo_res_id:
+            rec = Product.browse(mapping.odoo_res_id).exists()
+
+        # 2. Search existing by name scoped to company
+        if not rec:
+            rec = Product.search([
+                ("name", "=ilike", name),
+                ("company_id", "in", (False, self.company.id))
+            ], limit=1)
 
         uom_name = data.get("base_uom", "Units")
         uom = self.env["uom.uom"].search([("name", "=", uom_name)], limit=1)
@@ -459,8 +481,37 @@ class SyncEngine:
         """Upsert account.move (in_refund) from Tally Debit Note."""
         return self._upsert_invoice_move(data, move_type="in_refund")
 
+    def _find_or_create_tax(self, tax_name, rate=0.0, tax_type="sale"):
+        """Find or create matching account.tax in Odoo."""
+        Tax = self.env["account.tax"]
+        tax = Tax.search([
+            ("name", "=ilike", tax_name),
+            ("type_tax_use", "=", tax_type),
+            ("company_id", "=", self.company.id),
+        ], limit=1)
+        if not tax:
+            import re
+            m = re.search(r"(\d+(?:\.\d+)?)\s*%", tax_name)
+            calc_rate = float(m.group(1)) if m else rate
+            if calc_rate > 0:
+                tax = Tax.search([
+                    ("amount", "=", calc_rate),
+                    ("amount_type", "=", "percent"),
+                    ("type_tax_use", "=", tax_type),
+                    ("company_id", "=", self.company.id),
+                ], limit=1)
+            if not tax:
+                tax = Tax.create({
+                    "name": tax_name,
+                    "amount": calc_rate,
+                    "amount_type": "percent",
+                    "type_tax_use": tax_type,
+                    "company_id": self.company.id,
+                })
+        return tax
+
     def _upsert_invoice_move(self, data, move_type="out_invoice"):
-        """Generic handler for customer and vendor invoices/refunds."""
+        """Generic handler for customer and vendor invoices/refunds with GST tax mapping."""
         Move = self.env["account.move"]
         vch_num = data.get("voucher_number")
         date_str = data.get("date")
@@ -485,31 +536,66 @@ class SyncEngine:
         default_acc_name = "Sales Account" if default_acc_type == "income" else "Purchase Account"
         default_account = self._get_or_create_account(default_acc_name, default_type=default_acc_type)
 
-        # Prepare invoice lines
+        tax_type = "sale" if move_type in ("out_invoice", "out_refund") else "purchase"
+
+        # 1. Detect GST / Tax ledgers from ledger_entries
+        tax_ids = []
+        extra_charge_lines = []
+        for le in data.get("ledger_entries", []):
+            led = le.get("ledger", "")
+            amt = abs(float(le.get("amount") or 0.0))
+            if led == partner_name:
+                continue
+            led_lower = led.lower()
+            if any(k in led_lower for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "duties")):
+                tax_rec = self._find_or_create_tax(led, tax_type=tax_type)
+                if tax_rec and tax_rec.id not in tax_ids:
+                    tax_ids.append(tax_rec.id)
+            elif amt > 0:
+                # Supplementary charges / discounts / roundoff
+                charge_acc = self._get_or_create_account(led, default_type=default_acc_type)
+                extra_charge_lines.append((0, 0, {
+                    "name": led,
+                    "account_id": charge_acc.id if charge_acc else default_account.id,
+                    "quantity": 1,
+                    "price_unit": amt if float(le.get("amount") or 0.0) < 0 else -amt,
+                }))
+
+        # 2. Prepare invoice lines
         lines = []
         inv_entries = data.get("inventory_entries", [])
         if inv_entries:
             for ie in inv_entries:
                 product = self._get_or_create_product(ie.get("item"))
-                lines.append((0, 0, {
+                line_vals = {
                     "product_id": product.id if product else False,
                     "account_id": default_account.id if default_account else False,
                     "name": ie.get("item") or "Item",
                     "quantity": float(ie.get("qty") or 1.0),
                     "price_unit": float(ie.get("rate") or abs(float(ie.get("amount") or 0.0))),
                     "discount": float(ie.get("discount") or 0.0),
-                }))
+                }
+                if tax_ids:
+                    line_vals["tax_ids"] = [(6, 0, tax_ids)]
+                lines.append((0, 0, line_vals))
         else:
             # Fallback to ledger entries if pure accounting invoice
             for le in data.get("ledger_entries", []):
-                if le.get("ledger") != partner_name:
-                    account = self._get_or_create_account(le.get("ledger"), default_type=default_acc_type)
-                    lines.append((0, 0, {
-                        "name": le.get("ledger") or "Line",
+                led = le.get("ledger", "")
+                if led != partner_name and not any(k in led.lower() for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "duties")):
+                    account = self._get_or_create_account(led, default_type=default_acc_type)
+                    line_vals = {
+                        "name": led or "Line",
                         "account_id": account.id if account else (default_account.id if default_account else False),
                         "quantity": 1,
                         "price_unit": abs(float(le.get("amount") or 0.0)),
-                    }))
+                    }
+                    if tax_ids:
+                        line_vals["tax_ids"] = [(6, 0, tax_ids)]
+                    lines.append((0, 0, line_vals))
+
+        # Add any extra non-tax ledger charge lines
+        lines.extend(extra_charge_lines)
 
         # Default Journal
         journal_type = "sale" if move_type in ("out_invoice", "out_refund") else "purchase"
@@ -582,7 +668,7 @@ class SyncEngine:
         return rec
 
     def _upsert_journal_voucher(self, data):
-        """Upsert account.move (entry) from Tally Journal."""
+        """Upsert account.move (entry) from Tally Journal with automatic balance check."""
         Move = self.env["account.move"]
         vch_num = data.get("voucher_number")
         date_str = data.get("date")
@@ -599,6 +685,27 @@ class SyncEngine:
                 "debit": debit,
                 "credit": credit,
             }))
+
+        # Automatic balancing check & suspense adjustment
+        total_debit = sum(line[2]["debit"] for line in lines)
+        total_credit = sum(line[2]["credit"] for line in lines)
+        diff = round(total_debit - total_credit, 2)
+        if diff != 0:
+            rounding_account = self._get_or_create_account("Rounding & Suspense Difference", default_type="expense")
+            if diff < 0:
+                lines.append((0, 0, {
+                    "name": "Rounding / Balance Adjustment",
+                    "account_id": rounding_account.id,
+                    "debit": abs(diff),
+                    "credit": 0.0,
+                }))
+            else:
+                lines.append((0, 0, {
+                    "name": "Rounding / Balance Adjustment",
+                    "account_id": rounding_account.id,
+                    "debit": 0.0,
+                    "credit": abs(diff),
+                }))
 
         journal = self._get_or_create_journal("general")
 

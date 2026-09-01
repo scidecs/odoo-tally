@@ -57,11 +57,22 @@ class ResPartner(models.Model):
                 country_name=self.country_id.name if self.country_id else "India",
                 pincode=self.zip,
                 email=self.email,
-                phone=self.phone or self.mobile,
+                phone=self.phone or getattr(self, "mobile", None),
                 credit_limit=getattr(self, "credit_limit", 0.0),
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company)
+
+            should_enqueue = self.env["tally.mapping"].register_outbound(
+                instance=instance,
+                entity="ledger",
+                model_name=self._name,
+                res_id=self.id,
+                payload_xml=envelope_xml,
+            )
+            if not should_enqueue:
+                return
+
             self.env["tally.sync.queue"].create({
                 "instance_id": instance.id,
                 "entity": "ledger",

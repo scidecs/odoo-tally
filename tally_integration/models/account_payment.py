@@ -64,6 +64,17 @@ class AccountPayment(models.Model):
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company)
+
+            should_enqueue = self.env["tally.mapping"].register_outbound(
+                instance=instance,
+                entity=entity,
+                model_name=self._name,
+                res_id=self.id,
+                payload_xml=envelope_xml,
+            )
+            if not should_enqueue:
+                return
+
             self.env["tally.sync.queue"].create({
                 "instance_id": instance.id,
                 "entity": entity,

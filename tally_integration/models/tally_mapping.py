@@ -34,6 +34,46 @@ class TallyMapping(models.Model):
         "This Tally GUID is already mapped for this entity.",
     )
 
+    @api.model
+    def register_outbound(self, instance, entity, model_name, res_id, payload_xml, guid=None):
+        """Register or check outbound record for echo and re-push suppression.
+
+        Returns:
+            bool: True if record should be enqueued to Tally, False if skipped (echo/re-push).
+        """
+        import hashlib
+        p_hash = hashlib.sha256(payload_xml.encode("utf-8")).hexdigest()
+        mapping = self.search([
+            ("instance_id", "=", instance.id),
+            ("odoo_model_name", "=", model_name),
+            ("odoo_res_id", "=", res_id),
+        ], limit=1)
+
+        if mapping:
+            # If origin was Tally and content has not changed (e.g. manual post of imported voucher), skip re-pushing!
+            if mapping.last_origin == "tally" and mapping.content_hash == p_hash:
+                return False
+            mapping.write({
+                "last_origin": "odoo",
+                "content_hash": p_hash,
+                "last_sync": fields.Datetime.now(),
+                "state": "active",
+            })
+            return True
+        else:
+            self.create({
+                "instance_id": instance.id,
+                "entity": entity,
+                "tally_guid": guid or f"odoo_{entity}_{res_id}",
+                "odoo_model_name": model_name,
+                "odoo_res_id": res_id,
+                "content_hash": p_hash,
+                "last_origin": "odoo",
+                "last_sync": fields.Datetime.now(),
+                "state": "active",
+            })
+            return True
+
     def action_open_odoo_record(self):
         self.ensure_one()
         if not (self.odoo_model_name and self.odoo_res_id):
