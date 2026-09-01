@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_tally_discovered_company_list" model="ir.ui.view">
+        <field name="name">tally.discovered.company.list</field>
+        <field name="model">tally.discovered.company</field>
+        <field name="arch" type="xml">
+            <list string="Discovered Tally Companies">
+                <field name="name"/>
+                <field name="odoo_company_id"/>
+                <field name="instance_id"/>
+                <field name="last_seen"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'mapped'"
+                       decoration-muted="state == 'ignored'"/>
+                <button name="action_create_instance" type="object"
+                        string="Create Instance" icon="fa-plus"
+                        invisible="state == 'mapped'"/>
+                <button name="action_ignore" type="object"
+                        string="Ignore" icon="fa-ban"
+                        invisible="state != 'new'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_tally_discovered_company_form" model="ir.ui.view">
+        <field name="name">tally.discovered.company.form</field>
+        <field name="model">tally.discovered.company</field>
+        <field name="arch" type="xml">
+            <form string="Discovered Tally Company">
+                <header>
+                    <button name="action_create_instance" type="object"
+                            string="Create Instance" class="btn-primary"
+                            invisible="state == 'mapped'"/>
+                    <button name="action_ignore" type="object" string="Ignore"
+                            invisible="state != 'new'"/>
+                    <field name="state" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <group>
+                        <field name="name"/>
+                        <field name="odoo_company_id"/>
+                        <field name="instance_id"/>
+                        <field name="last_seen"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_tally_discovered_company" model="ir.actions.act_window">
+        <field name="name">Discovered Companies</field>
+        <field name="res_model">tally.discovered.company</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No Tally companies discovered yet</p>
+            <p>Once the on-prem agent connects, the Tally company files it can see appear here.
+               Map each to an Odoo company and create its instance in one click.</p>
+        </field>
+    </record>
+</odoo>

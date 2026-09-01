@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_tally_entity_config_list" model="ir.ui.view">
+        <field name="name">tally.entity.config.list</field>
+        <field name="model">tally.entity.config</field>
+        <field name="arch" type="xml">
+            <list string="Entity Configuration">
+                <field name="instance_id"/>
+                <field name="entity"/>
+                <field name="odoo_model_name"/>
+                <field name="enabled"/>
+                <field name="direction"/>
+                <field name="source_of_truth"/>
+                <field name="last_alterid"/>
+                <field name="last_sync"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_tally_entity_config" model="ir.actions.act_window">
+        <field name="name">Entity Configuration</field>
+        <field name="res_model">tally.entity.config</field>
+        <field name="view_mode">list</field>
+    </record>
+</odoo>

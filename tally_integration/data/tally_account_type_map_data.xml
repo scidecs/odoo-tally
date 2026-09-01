@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!-- Tally reserved groups → Odoo account_type. Editable after install. -->
+        <record id="atm_capital" model="tally.account.type.map">
+            <field name="tally_group">Capital Account</field><field name="account_type">equity</field>
+        </record>
+        <record id="atm_loans_liability" model="tally.account.type.map">
+            <field name="tally_group">Loans (Liability)</field><field name="account_type">liability_non_current</field>
+        </record>
+        <record id="atm_current_liabilities" model="tally.account.type.map">
+            <field name="tally_group">Current Liabilities</field><field name="account_type">liability_current</field>
+        </record>
+        <record id="atm_sundry_creditors" model="tally.account.type.map">
+            <field name="tally_group">Sundry Creditors</field><field name="account_type">liability_payable</field>
+        </record>
+        <record id="atm_duties_taxes" model="tally.account.type.map">
+            <field name="tally_group">Duties &amp; Taxes</field><field name="account_type">liability_current</field>
+        </record>
+        <record id="atm_provisions" model="tally.account.type.map">
+            <field name="tally_group">Provisions</field><field name="account_type">liability_current</field>
+        </record>
+        <record id="atm_bank_od" model="tally.account.type.map">
+            <field name="tally_group">Bank OD A/c</field><field name="account_type">liability_current</field>
+        </record>
+        <record id="atm_secured_loans" model="tally.account.type.map">
+            <field name="tally_group">Secured Loans</field><field name="account_type">liability_non_current</field>
+        </record>
+        <record id="atm_unsecured_loans" model="tally.account.type.map">
+            <field name="tally_group">Unsecured Loans</field><field name="account_type">liability_non_current</field>
+        </record>
+        <record id="atm_fixed_assets" model="tally.account.type.map">
+            <field name="tally_group">Fixed Assets</field><field name="account_type">asset_fixed</field>
+        </record>
+        <record id="atm_investments" model="tally.account.type.map">
+            <field name="tally_group">Investments</field><field name="account_type">asset_non_current</field>
+        </record>
+        <record id="atm_current_assets" model="tally.account.type.map">
+            <field name="tally_group">Current Assets</field><field name="account_type">asset_current</field>
+        </record>
+        <record id="atm_sundry_debtors" model="tally.account.type.map">
+            <field name="tally_group">Sundry Debtors</field><field name="account_type">asset_receivable</field>
+        </record>
+        <record id="atm_bank_accounts" model="tally.account.type.map">
+            <field name="tally_group">Bank Accounts</field><field name="account_type">asset_cash</field>
+        </record>
+        <record id="atm_cash_in_hand" model="tally.account.type.map">
+            <field name="tally_group">Cash-in-Hand</field><field name="account_type">asset_cash</field>
+        </record>
+        <record id="atm_stock_in_hand" model="tally.account.type.map">
+            <field name="tally_group">Stock-in-Hand</field><field name="account_type">asset_current</field>
+        </record>
+        <record id="atm_loans_advances" model="tally.account.type.map">
+            <field name="tally_group">Loans &amp; Advances (Asset)</field><field name="account_type">asset_current</field>
+        </record>
+        <record id="atm_deposits" model="tally.account.type.map">
+            <field name="tally_group">Deposits (Asset)</field><field name="account_type">asset_non_current</field>
+        </record>
+        <record id="atm_misc_expenses" model="tally.account.type.map">
+            <field name="tally_group">Misc. Expenses (ASSET)</field><field name="account_type">asset_current</field>
+        </record>
+        <record id="atm_suspense" model="tally.account.type.map">
+            <field name="tally_group">Suspense A/c</field><field name="account_type">asset_current</field>
+        </record>
+        <record id="atm_branch" model="tally.account.type.map">
+            <field name="tally_group">Branch / Divisions</field><field name="account_type">asset_current</field>
+        </record>
+        <record id="atm_sales" model="tally.account.type.map">
+            <field name="tally_group">Sales Accounts</field><field name="account_type">income</field>
+        </record>
+        <record id="atm_direct_incomes" model="tally.account.type.map">
+            <field name="tally_group">Direct Incomes</field><field name="account_type">income</field>
+        </record>
+        <record id="atm_indirect_incomes" model="tally.account.type.map">
+            <field name="tally_group">Indirect Incomes</field><field name="account_type">income_other</field>
+        </record>
+        <record id="atm_purchase" model="tally.account.type.map">
+            <field name="tally_group">Purchase Accounts</field><field name="account_type">expense_direct_cost</field>
+        </record>
+        <record id="atm_direct_expenses" model="tally.account.type.map">
+            <field name="tally_group">Direct Expenses</field><field name="account_type">expense_direct_cost</field>
+        </record>
+        <record id="atm_indirect_expenses" model="tally.account.type.map">
+            <field name="tally_group">Indirect Expenses</field><field name="account_type">expense</field>
+        </record>
+    </data>
+</odoo>

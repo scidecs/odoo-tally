@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_tally_onboarding_form" model="ir.ui.view">
+        <field name="name">tally.onboarding.form</field>
+        <field name="model">tally.onboarding</field>
+        <field name="arch" type="xml">
+            <form string="Tally Onboarding">
+                <sheet>
+                    <div class="oe_title">
+                        <h2>Initial migration from Tally</h2>
+                    </div>
+                    <group>
+                        <field name="instance_id" readonly="context.get('default_instance_id')"/>
+                        <field name="coa_mode" widget="radio"/>
+                    </group>
+                    <separator string="What to pull"/>
+                    <group>
+                        <group>
+                            <field name="sync_coa"/>
+                            <field name="sync_masters"/>
+                            <field name="sync_opening_balance"/>
+                        </group>
+                        <group>
+                            <field name="sync_history"/>
+                            <field name="history_from" invisible="not sync_history"
+                                   required="sync_history"/>
+                            <field name="reset_watermarks"/>
+                        </group>
+                    </group>
+                    <div class="text-muted">
+                        This resets change-tracking watermarks so the next agent poll performs a
+                        full export. Run it on a fresh or reconciled Odoo company; review results
+                        in the Sync Logs before enabling ongoing two-way sync.
+                    </div>
+                </sheet>
+                <footer>
+                    <button name="action_start" type="object" string="Start Onboarding"
+                            class="btn-primary"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

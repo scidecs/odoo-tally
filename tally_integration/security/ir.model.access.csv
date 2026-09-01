@@ -1,0 +1,16 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_tally_instance_user,tally.instance.user,model_tally_instance,group_tally_user,1,0,0,0
+access_tally_instance_manager,tally.instance.manager,model_tally_instance,group_tally_manager,1,1,1,1
+access_tally_entity_config_user,tally.entity.config.user,model_tally_entity_config,group_tally_user,1,0,0,0
+access_tally_entity_config_manager,tally.entity.config.manager,model_tally_entity_config,group_tally_manager,1,1,1,1
+access_tally_mapping_user,tally.mapping.user,model_tally_mapping,group_tally_user,1,0,0,0
+access_tally_mapping_manager,tally.mapping.manager,model_tally_mapping,group_tally_manager,1,1,1,1
+access_tally_sync_log_user,tally.sync.log.user,model_tally_sync_log,group_tally_user,1,0,0,0
+access_tally_sync_log_manager,tally.sync.log.manager,model_tally_sync_log,group_tally_manager,1,1,1,1
+access_tally_sync_queue_user,tally.sync.queue.user,model_tally_sync_queue,group_tally_user,1,0,0,0
+access_tally_sync_queue_manager,tally.sync.queue.manager,model_tally_sync_queue,group_tally_manager,1,1,1,1
+access_tally_account_type_map_user,tally.account.type.map.user,model_tally_account_type_map,group_tally_user,1,0,0,0
+access_tally_account_type_map_manager,tally.account.type.map.manager,model_tally_account_type_map,group_tally_manager,1,1,1,1
+access_tally_discovered_company_user,tally.discovered.company.user,model_tally_discovered_company,group_tally_user,1,0,0,0
+access_tally_discovered_company_manager,tally.discovered.company.manager,model_tally_discovered_company,group_tally_manager,1,1,1,1
+access_tally_onboarding_manager,tally.onboarding.manager,model_tally_onboarding,group_tally_manager,1,1,1,1

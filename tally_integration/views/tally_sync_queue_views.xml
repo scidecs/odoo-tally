@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_tally_sync_queue_list" model="ir.ui.view">
+        <field name="name">tally.sync.queue.list</field>
+        <field name="model">tally.sync.queue</field>
+        <field name="arch" type="xml">
+            <list string="Outbound Queue" decoration-danger="state == 'failed'"
+                  decoration-muted="state == 'acked'">
+                <field name="create_date"/>
+                <field name="instance_id"/>
+                <field name="entity"/>
+                <field name="odoo_model_name"/>
+                <field name="odoo_res_id"/>
+                <field name="attempts"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'acked'"
+                       decoration-info="state == 'sent'"
+                       decoration-danger="state == 'failed'"/>
+                <button name="action_retry" type="object" string="Retry"
+                        icon="fa-refresh" invisible="state != 'failed'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_tally_sync_queue_form" model="ir.ui.view">
+        <field name="name">tally.sync.queue.form</field>
+        <field name="model">tally.sync.queue</field>
+        <field name="arch" type="xml">
+            <form string="Outbound Item">
+                <header>
+                    <button name="action_retry" type="object" string="Retry"
+                            class="btn-primary" invisible="state != 'failed'"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="pending,sent,acked,failed"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="instance_id"/>
+                            <field name="entity"/>
+                            <field name="odoo_model_name"/>
+                            <field name="odoo_res_id"/>
+                        </group>
+                        <group>
+                            <field name="idempotency_key"/>
+                            <field name="attempts"/>
+                        </group>
+                    </group>
+                    <separator string="Payload (Tally XML)"/>
+                    <field name="payload"/>
+                    <separator string="Error"/>
+                    <field name="error"/>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_tally_sync_queue" model="ir.actions.act_window">
+        <field name="name">Outbound Queue</field>
+        <field name="res_model">tally.sync.queue</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

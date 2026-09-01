@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_tally_sync_log_list" model="ir.ui.view">
+        <field name="name">tally.sync.log.list</field>
+        <field name="model">tally.sync.log</field>
+        <field name="arch" type="xml">
+            <list string="Sync Logs" create="false">
+                <field name="create_date"/>
+                <field name="instance_id"/>
+                <field name="direction"/>
+                <field name="entity"/>
+                <field name="message"/>
+                <field name="status" widget="badge"
+                       decoration-success="status == 'success'"
+                       decoration-warning="status == 'warning'"
+                       decoration-danger="status == 'error'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_tally_sync_log_form" model="ir.ui.view">
+        <field name="name">tally.sync.log.form</field>
+        <field name="model">tally.sync.log</field>
+        <field name="arch" type="xml">
+            <form string="Sync Log" create="false">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="create_date"/>
+                            <field name="instance_id"/>
+                            <field name="direction"/>
+                            <field name="entity"/>
+                            <field name="status"/>
+                        </group>
+                        <group>
+                            <field name="tally_guid"/>
+                            <field name="odoo_model_name"/>
+                            <field name="odoo_res_id"/>
+                        </group>
+                    </group>
+                    <separator string="Message"/>
+                    <field name="message"/>
+                    <field name="detail"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_tally_sync_log_search" model="ir.ui.view">
+        <field name="name">tally.sync.log.search</field>
+        <field name="model">tally.sync.log</field>
+        <field name="arch" type="xml">
+            <search string="Sync Logs">
+                <field name="message"/>
+                <field name="instance_id"/>
+                <filter string="Errors" name="errors" domain="[('status', '=', 'error')]"/>
+                <filter string="Warnings" name="warnings" domain="[('status', '=', 'warning')]"/>
+                <filter string="Tally → Odoo" name="t2o" domain="[('direction', '=', 'tally_to_odoo')]"/>
+                <filter string="Odoo → Tally" name="o2t" domain="[('direction', '=', 'odoo_to_tally')]"/>
+                <group expand="0" string="Group By">
+                    <filter string="Status" name="grp_status" context="{'group_by': 'status'}"/>
+                    <filter string="Entity" name="grp_entity" context="{'group_by': 'entity'}"/>
+                    <filter string="Direction" name="grp_dir" context="{'group_by': 'direction'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_tally_sync_log_pivot" model="ir.ui.view">
+        <field name="name">tally.sync.log.pivot</field>
+        <field name="model">tally.sync.log</field>
+        <field name="arch" type="xml">
+            <pivot string="Sync Logs">
+                <field name="entity" type="row"/>
+                <field name="status" type="col"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="view_tally_sync_log_graph" model="ir.ui.view">
+        <field name="name">tally.sync.log.graph</field>
+        <field name="model">tally.sync.log</field>
+        <field name="arch" type="xml">
+            <graph string="Sync Logs" type="bar">
+                <field name="entity"/>
+                <field name="status"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="action_tally_sync_log" model="ir.actions.act_window">
+        <field name="name">Sync Logs</field>
+        <field name="res_model">tally.sync.log</field>
+        <field name="view_mode">list,pivot,graph,form</field>
+        <field name="search_view_id" ref="view_tally_sync_log_search"/>
+    </record>
+</odoo>

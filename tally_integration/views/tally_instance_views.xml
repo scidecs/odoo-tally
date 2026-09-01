@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_tally_instance_list" model="ir.ui.view">
+        <field name="name">tally.instance.list</field>
+        <field name="model">tally.instance</field>
+        <field name="arch" type="xml">
+            <list string="Tally Instances">
+                <field name="name"/>
+                <field name="tally_company"/>
+                <field name="tally_host"/>
+                <field name="tally_port"/>
+                <field name="default_source"/>
+                <field name="agent_last_seen"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'online'"
+                       decoration-danger="state == 'offline'"
+                       decoration-muted="state == 'draft'"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_tally_instance_form" model="ir.ui.view">
+        <field name="name">tally.instance.form</field>
+        <field name="model">tally.instance</field>
+        <field name="arch" type="xml">
+            <form string="Tally Instance">
+                <header>
+                    <button name="action_test_connection" type="object"
+                            string="Test Connection" icon="fa-plug"/>
+                    <button name="action_open_onboarding" type="object"
+                            string="Start Onboarding" icon="fa-rocket"
+                            groups="tally_integration.group_tally_manager"/>
+                    <button name="action_load_default_entities" type="object"
+                            string="Load Default Entities" icon="fa-magic"
+                            groups="tally_integration.group_tally_manager"/>
+                    <button name="action_generate_token" type="object"
+                            string="Generate Agent Token" icon="fa-key"
+                            groups="tally_integration.group_tally_manager"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="draft,online,offline"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_mappings" type="object"
+                                class="oe_stat_button" icon="fa-exchange">
+                            <field name="mapping_count" widget="statinfo" string="Mappings"/>
+                        </button>
+                        <button name="action_view_logs" type="object"
+                                class="oe_stat_button" icon="fa-list">
+                            <field name="log_count" widget="statinfo" string="Log Entries"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <label for="name"/>
+                        <h1><field name="name" placeholder="e.g. Head Office Tally"/></h1>
+                    </div>
+                    <group>
+                        <group string="Tally Endpoint">
+                            <field name="tally_company"/>
+                            <field name="tally_host"/>
+                            <field name="tally_port"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                        </group>
+                        <group string="Sync Policy">
+                            <field name="default_source"/>
+                            <field name="poll_interval"/>
+                            <field name="queue_pending"/>
+                            <field name="active" invisible="1"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Entities" name="entities">
+                            <field name="entity_config_ids">
+                                <list editable="bottom">
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="entity"/>
+                                    <field name="odoo_model_name"/>
+                                    <field name="enabled"/>
+                                    <field name="direction"/>
+                                    <field name="source_of_truth"/>
+                                    <field name="last_alterid" readonly="1"/>
+                                    <field name="last_sync" readonly="1"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Agent" name="agent">
+                            <group>
+                                <group string="Pairing">
+                                    <field name="agent_token" password="True"
+                                           groups="tally_integration.group_tally_manager"/>
+                                    <field name="agent_last_seen"/>
+                                </group>
+                                <group string="How it connects">
+                                    <div colspan="2" class="text-muted">
+                                        The on-prem Sync Agent authenticates with the token above
+                                        and makes outbound-only HTTPS to this Odoo instance. It polls
+                                        Tally for AlterID changes and writes Odoo-owned records back
+                                        into Tally. No inbound ports are opened on-site.
+                                    </div>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_tally_instance_search" model="ir.ui.view">
+        <field name="name">tally.instance.search</field>
+        <field name="model">tally.instance</field>
+        <field name="arch" type="xml">
+            <search string="Tally Instances">
+                <field name="name"/>
+                <field name="tally_company"/>
+                <filter string="Online" name="online" domain="[('state', '=', 'online')]"/>
+                <filter string="Offline" name="offline" domain="[('state', '=', 'offline')]"/>
+                <group expand="0" string="Group By">
+                    <filter string="Source of Truth" name="grp_sot"
+                            context="{'group_by': 'default_source'}"/>
+                    <filter string="Status" name="grp_state" context="{'group_by': 'state'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_tally_instance" model="ir.actions.act_window">
+        <field name="name">Tally Instances</field>
+        <field name="res_model">tally.instance</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_tally_instance_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Connect your first Tally instance</p>
+            <p>Define the Tally endpoint, choose the source of truth, load the entities to sync,
+               and pair the on-prem Sync Agent.</p>
+        </field>
+    </record>
+</odoo>
