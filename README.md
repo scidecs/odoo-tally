@@ -1,26 +1,280 @@
 # Tally Prime ⇄ Odoo 19 Integration (`tally_integration`)
 
-A native Odoo 19 module providing near-real-time, two-way synchronization between **TallyPrime** and **Odoo 19** (Enterprise / Odoo.sh / On-Premise).
+[![Odoo Version](https://img.shields.io/badge/Odoo-19.0-875A7B.svg)](https://www.odoo.com/)
+[![License: LGPL-3](https://img.shields.io/badge/License-LGPL--3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+[![Vendor](https://img.shields.io/badge/Vendor-Scidecs-green.svg)](https://www.scidecs.com)
 
-## Key Features
-- **Configurable Source of Truth**: Global and per-entity configuration (`tally`, `odoo`, `tally_master`, `bidirectional`).
-- **Echo & Loop Suppression**: SHA-256 content hashing and origin tracking prevents ping-pong loops.
-- **Master Data Synchronization**:
-  - Account Groups (`account.group` ⇄ Tally Group)
-  - General Accounts (`account.account` ⇄ Tally Ledger)
-  - Party Ledgers (`res.partner` ⇄ Tally Debtors/Creditors with Indian GSTIN, PAN, State)
-  - Units of Measure (`uom.uom` ⇄ Tally Unit)
-  - Stock Groups & Items (`product.category`, `product.product` ⇄ Tally Stock Item & HSN)
-  - Cost Centres (`account.analytic.account` ⇄ Tally Cost Centre)
-  - Taxes (`account.tax` ⇄ Tally Duty/Tax Ledgers)
-  - Godowns / Locations (`stock.location` ⇄ Tally Godown)
-- **Transaction & Voucher Synchronization**:
-  - Sales Invoices (`account.move` out_invoice) & Credit Notes (`account.move` out_refund)
-  - Purchase Bills (`account.move` in_invoice) & Debit Notes (`account.move` in_refund)
-  - Customer Receipts & Vendor Payments (`account.payment` with `<BILLALLOCATIONS>`)
-  - Journal Vouchers & Contra Entries (`account.move` entry)
-- **Queue & Agent Controllers**: Token-authenticated `/tally/agent/*` endpoints consumed by on-premise Sync Agent.
-- **Native Dashboards**: Standard Odoo list, form, search, pivot, and graph views with multi-company security.
+A native Odoo 19 App-Store-grade module for near-real-time, two-way synchronization between **TallyPrime** and **Odoo 19** (Enterprise / Community / Odoo.sh / On-Premise).
 
-## Installation
-Place `tally_integration` in your Odoo `addons_path`, update the Apps list, and install **Tally Prime Integration**.
+Developed and maintained by **[Scidecs](https://www.scidecs.com)**.
+
+---
+
+## Table of Contents
+1. [Architecture Overview](#1-architecture-overview)
+2. [Step-by-Step Setup Guide](#2-step-by-step-setup-guide)
+   - [Step 1: Install Odoo Module](#step-1-install-odoo-module)
+   - [Step 2: Configure TallyPrime Gateway & Credentials](#step-2-configure-tallyprime-gateway--credentials)
+   - [Step 3: Configure Tally Instance in Odoo UI](#step-3-configure-tally-instance-in-odoo-ui)
+   - [Step 4: Run the On-Premise Sync Agent](#step-4-run-the-on-premise-sync-agent)
+3. [Deployment Scenarios](#3-deployment-scenarios)
+   - [Scenario A: Odoo Enterprise (Full Accounting / Two-Way)](#scenario-a-odoo-enterprise-full-accounting--two-way)
+   - [Scenario B: Odoo Community (Operational Front-Office → Tally Books)](#scenario-b-odoo-community-operational-front-office--tally-books)
+   - [Scenario C: Greenfield Migration & Initial Onboarding](#scenario-c-greenfield-migration--initial-onboarding)
+   - [Scenario D: Map to Existing Odoo Chart of Accounts](#scenario-d-map-to-existing-odoo-chart-of-accounts)
+4. [Entity & Table Mapping Reference](#4-entity--table-mapping-reference)
+5. [Source of Truth, Conflict Resolution & Echo Suppression](#5-source-of-truth-conflict-resolution--echo-suppression)
+6. [Troubleshooting & FAQ](#6-troubleshooting--faq)
+
+---
+
+## 1. Architecture Overview
+
+```
++-------------------------------------------------------------------+
+|                        CLOUD / ODOO.SH                            |
+|                                                                   |
+|   +-----------------------------------------------------------+   |
+|   |             Odoo 19 (Module: tally_integration)           |   |
+|   |  - Controllers: /tally/agent/{heartbeat,companies,push..} |   |
+|   |  - Identity Mapping Registry: tally.mapping               |   |
+|   |  - Sync Queue & Dashboards: tally.sync.queue / log        |   |
+|   |  - Sync Engine & XML Builders/Parsers                     |   |
+|   +-----------------------------------------------------------+   |
++---------------------------------^---------------------------------+
+                                  |
+              Outbound HTTPS Only | (Bearer Token Authentication)
+                                  |
++---------------------------------v---------------------------------+
+|                    ON-PREMISE LOCAL NETWORK                       |
+|                                                                   |
+|   +--------------------------+     HTTP XML      +------------+   |
+|   |  On-Premise Sync Agent   | ----------------> | TallyPrime |   |
+|   |  (Python Service / NSSM) | <---------------- | (Port 9000)|   |
+|   +--------------------------+   (Port 9000/TCP) +------------+   |
+|                                                                   |
++-------------------------------------------------------------------+
+```
+
+### Why this design?
+- **Zero Firewall Holes**: Tally runs on a local Windows PC/Server behind NAT. Odoo cloud instances cannot directly reach your LAN. The On-Premise Agent initiates **outbound-only HTTPS** to Odoo, polls Tally's AlterID cursor, and pushes/pulls XML.
+- **Non-Invasive**: No custom columns are added to core Odoo tables (`res.partner`, `account.move`, `product.product`). All IDs and watermarks live cleanly inside `tally.mapping`.
+
+---
+
+## 2. Step-by-Step Setup Guide
+
+### Step 1: Install Odoo Module
+1. Place the `tally_integration` directory inside your custom addons path.
+2. In Odoo, activate **Developer Mode** (Settings -> Activate developer mode).
+3. Go to **Apps** -> Click **Update Apps List**.
+4. Search for `Tally Prime Integration` and click **Install**.
+
+---
+
+### Step 2: Configure TallyPrime Gateway & Credentials
+
+TallyPrime acts as an XML Server listening on a local port (default: `9000`).
+
+#### 1. Enable XML Gateway in TallyPrime:
+1. Open **TallyPrime** (run as Administrator if needed).
+2. Press **`F1: Help`** (top right) -> Select **Settings** -> Select **Connectivity**.
+3. In the **Connectivity Settings** screen:
+   - **TallyPrime acts as**: Set to `Both` (or `Server`).
+   - **Enable ODBC**: Set to `Yes`.
+   - **Port**: Set to `9000` (or your preferred port).
+4. Press **`Ctrl + A`** to save.
+5. **Restart TallyPrime** for connectivity changes to take effect.
+
+#### 2. Open the Company:
+- Ensure the company you wish to sync is **open and loaded** in TallyPrime.
+- Note the exact company name as shown in the top-left title bar (e.g. `Acme Enterprises Pvt Ltd`).
+
+#### 3. Tally Credentials & Security:
+- If Tally Vault / Security is enabled on your company, ensure the user credentials have data export/import permissions.
+
+---
+
+### Step 3: Configure Tally Instance in Odoo UI
+
+1. In Odoo, navigate to **Invoicing** (or **Accounting**) -> **Configuration** -> **Tally Integration** -> **Instances**.
+2. Click **New** and fill in the configuration:
+   - **Name**: e.g., `Head Office Tally`.
+   - **Company**: Select the matching Odoo company.
+   - **Tally Host**: `127.0.0.1` (from the local agent's perspective).
+   - **Tally Port**: `9000`.
+   - **Tally Company**: Enter the exact company name open in TallyPrime.
+   - **Default Source of Truth**:
+     - `Tally (accounting system)` *(Recommended)*: Tally wins conflicts; changes in Tally update Odoo.
+     - `Odoo`: Odoo wins conflicts; changes in Odoo update Tally.
+   - **Tally Mode (`tally_inventory`)**:
+     - `Accounts with Inventory`: Standard stock items + ledger vouchers.
+     - `Accounts only`: Ledger-only vouchers (disables item lines for non-inventory companies).
+   - **Odoo Role (`odoo_role`)**:
+     - `Full (Two-Way)`: Recommended for Enterprise with full accounting.
+     - `Operational (Odoo → Tally)`: Recommended for Community (Odoo handles front-office sales/invoicing and pushes financial data to Tally).
+   - **Poll Interval (s)**: `60` (agent checks Tally for changes every 60 seconds).
+3. Click **Generate Token** under the **Agent Pairing** tab. Copy this bearer token.
+4. Click **Load Default Entities** (top button) to automatically register all master and voucher sync rules.
+
+---
+
+### Step 4: Run the On-Premise Sync Agent
+
+The standalone Python agent runs on the local Windows PC or server where Tally is located.
+
+#### 1. Setup Environment:
+```bash
+# Clone or copy the agent directory to the local Windows machine
+git clone https://github.com/scidecs/odoo-tally.git
+cd odoo-tally/agent
+
+# Install dependencies (Python 3.8+)
+pip install requests
+```
+
+#### 2. Configure Credentials:
+Create `agent.conf` or set environment variables:
+```ini
+[odoo]
+url = https://your-odoo-instance.com
+token = <PASTE_GENERATED_AGENT_TOKEN_HERE>
+
+[tally]
+host = 127.0.0.1
+port = 9000
+company = Acme Enterprises Pvt Ltd
+
+[sync]
+poll_interval = 60
+batch_size = 100
+```
+
+#### 3. Start Agent:
+```bash
+python tally_agent.py
+```
+
+#### 4. Run as a Windows Service (Production):
+To ensure 24/7 continuous synchronization on Windows, use [NSSM (Non-Sucking Service Manager)](https://nssm.cc/):
+```powershell
+nssm install OdooTallyAgent "C:\Python311\python.exe" "C:\OdooTally\agent\tally_agent.py"
+nssm start OdooTallyAgent
+```
+
+---
+
+## 3. Deployment Scenarios
+
+### Scenario A: Odoo Enterprise (Full Accounting / Two-Way)
+- **Target Audience**: Organizations using Odoo Enterprise with full double-entry accounting where Tally is either the legacy system or parallel audit system.
+- **Configuration**:
+  - `Odoo Role`: `Full (Two-Way)`
+  - `Default Source of Truth`: `Tally` (or `Odoo` depending on workflow preference)
+- **Sync Behavior**:
+  - Masters created in Tally pull automatically into Odoo.
+  - Invoices and Receipts posted in Odoo push to Tally.
+  - Vouchers entered in Tally pull into Odoo draft/posted entries.
+  - SHA-256 echo suppression prevents loopback re-imports.
+
+### Scenario B: Odoo Community (Operational Front-Office → Tally Books)
+- **Target Audience**: Businesses running Odoo Community for CRM, Sales, Inventory, and Purchase, while relying on Tally for statutory accounting, GST return filing, and balance sheets.
+- **Configuration**:
+  - `Odoo Role`: `Operational (Odoo → Tally)`
+- **Sync Behavior**:
+  - Sales Invoices, Customer Receipts, Purchase Bills, and Vendor Payments posted in Odoo are automatically queued and pushed to Tally.
+  - Inbound voucher import is disabled to avoid cluttering Community with raw journal entries.
+  - Party master records stay synchronized across both systems.
+
+### Scenario C: Greenfield Migration & Initial Onboarding
+- **Target Audience**: New Odoo installations migrating master records and transaction history from an established Tally instance.
+- **Configuration**:
+  - Open Instance -> Click **Tally Onboarding** button.
+  - Set **Chart of Accounts Mode**: `Import CoA from Tally`.
+  - Set **History From**: e.g., `2024-04-01` (start of financial year).
+  - Click **Start Initial Sync**. The agent will pull all Groups, Ledgers, Products, UoMs, opening balances, and past vouchers.
+
+### Scenario D: Map to Existing Odoo Chart of Accounts
+- **Target Audience**: Odoo databases that already have a standardized Chart of Accounts (e.g. Indian localization `l10n_in`).
+- **Configuration**:
+  - In Instance, set **Chart of Accounts Mode**: `Map to existing Odoo CoA`.
+  - Open **Configuration** -> **Account Type Mappings** (`tally.account.type.map`).
+  - Configure how Tally groups (e.g. `Sundry Debtors`, `Bank Accounts`, `Direct Incomes`, `Indirect Expenses`) map to Odoo `account_type` values (`asset_receivable`, `asset_cash`, `income`, `expense`).
+
+---
+
+## 4. Entity & Table Mapping Reference
+
+Every entity can be individually enabled/disabled with independent directional control (**Tally to Odoo**, **Odoo to Tally**, or **Both**).
+
+### Masters Mapping Table
+
+| Entity Key | Odoo Model | Tally Tag / Object | Direction Options | Key Mapped Attributes |
+| :--- | :--- | :--- | :--- | :--- |
+| `group` | `account.group` | `<GROUP>` | Tally → Odoo | Group Name, Parent Group hierarchy |
+| `account_ledger` | `account.account` | `<LEDGER>` (General) | Both / Directional | Name, Code, Account Type, Currency |
+| `ledger` | `res.partner` | `<LEDGER>` (Party) | Both / Directional | Name, GSTIN, PAN, Address, State, PIN, Phone, Email, Credit Limit |
+| `uom` | `uom.uom` | `<UNIT>` | Tally → Odoo | Unit Name, Symbol, Decimal Places |
+| `stock_group` | `product.category` | `<STOCKGROUP>` | Tally → Odoo | Category Name, Parent Category |
+| `stock_item` | `product.product` | `<STOCKITEM>` | Both / Directional | Name, Base UoM, Category, HSN Code, Cost Price, Sale Price |
+| `cost_centre` | `account.analytic.account` | `<COSTCENTRE>` | Tally → Odoo | Cost Centre Name, Analytic Plan |
+| `godown` | `stock.location` | `<GODOWN>` | Tally → Odoo | Location Name, Parent Location |
+| `tax` | `account.tax` | `<LEDGER>` (Duties/Taxes) | Tally → Odoo | Tax Name, Rate of Tax (%), Tax Type |
+
+### Vouchers / Transactions Mapping Table
+
+| Entity Key | Odoo Model (`move_type` / `payment_type`) | Tally Voucher Type | Direction Options | Key Mapped Attributes |
+| :--- | :--- | :--- | :--- | :--- |
+| `sales` | `account.move` (`out_invoice`) | `Sales` | Both / Directional | Voucher No, Date, Customer, Inventory Lines, Tax Lines, Bill Allocation |
+| `credit_note` | `account.move` (`out_refund`) | `Credit Note` | Both / Directional | Voucher No, Date, Customer, Return Items, Reference Invoice |
+| `purchase` | `account.move` (`in_invoice`) | `Purchase` | Both / Directional | Bill No, Date, Vendor, Inventory Lines, Tax Lines, Bill Allocation |
+| `debit_note` | `account.move` (`in_refund`) | `Debit Note` | Both / Directional | Voucher No, Date, Vendor, Return Items, Reference Bill |
+| `receipt` | `account.payment` (`inbound`) | `Receipt` | Both / Directional | Customer, Bank/Cash Journal, Amount, Date, `<BILLALLOCATIONS>` (Agst Ref) |
+| `payment` | `account.payment` (`outbound`) | `Payment` | Both / Directional | Vendor, Bank/Cash Journal, Amount, Date, `<BILLALLOCATIONS>` (Agst Ref) |
+| `journal` | `account.move` (`entry`) | `Journal` | Both / Directional | Voucher No, Date, Multi-line Debit/Credit entries, Narration |
+| `contra` | `account.move` (`entry`) | `Contra` | Both / Directional | Bank-to-Cash, Cash-to-Bank, Bank-to-Bank transfers |
+
+---
+
+## 5. Source of Truth, Conflict Resolution & Echo Suppression
+
+### 1. Watermarking with AlterID
+- Tally maintains an incremental integer watermark called `ALTERID` across all masters and vouchers.
+- On each poll, the agent only requests records with `ALTERID > last_alterid`.
+- Successful processing updates `last_alterid` on `tally.entity.config`, ensuring high performance even on datasets with 100,000+ vouchers.
+
+### 2. SHA-256 Echo & Loop Suppression
+When Odoo pushes a record to Tally:
+1. The record is created/updated in Tally.
+2. Tally assigns a new `ALTERID` to the record.
+3. On the next poll, Tally returns this record as a "new change".
+4. The **Sync Engine** compares the record's SHA-256 hash (`content_hash`) and origin (`odoo`).
+5. Because the content hash matches and origin was Odoo, the echo is **suppressed immediately**, preventing infinite loop ping-pongs.
+
+### 3. Conflict Resolution
+- If an entity has direction `both` and changes occur simultaneously in both systems:
+  - If **Source of Truth** is `Tally`, the Tally version overwrites Odoo.
+  - If **Source of Truth** is `Odoo`, the Odoo version overwrites Tally.
+
+---
+
+## 6. Troubleshooting & FAQ
+
+#### Q: The agent says "Connection Refused on 127.0.0.1:9000".
+- **Fix**: Check that TallyPrime is open. Verify in `F1: Help -> Settings -> Connectivity` that Tally acts as `Both` or `Server` with port `9000`. Restart TallyPrime as Administrator.
+
+#### Q: The agent connects but says "Company Not Open / Found".
+- **Fix**: Check `tally_company` in Odoo Instance settings. It must match the company name open in TallyPrime character-for-character.
+
+#### Q: How do I view sync errors or audit logs?
+- **Fix**: Navigate to **Invoicing -> Configuration -> Tally Integration -> Sync Logs**. You can group by Entity, Status (`success`, `warning`, `error`), and inspect exact XML payloads and failure tracebacks.
+
+#### Q: Does this module conflict with third-party custom modules?
+- **Fix**: No. All outbound hooks are wrapped in defensive `try...except` and guarded by `tally_no_sync` context flags. All mapping data is stored in dedicated tables without polluting standard Odoo models.
+
+---
+
+## License & Support
+- **License**: LGPL-3
+- **Author & Vendor**: [Scidecs](https://www.scidecs.com)
+- **Support & Customizations**: Reach out via [https://www.scidecs.com](https://www.scidecs.com) or submit issues on [GitHub](https://github.com/scidecs/odoo-tally).
