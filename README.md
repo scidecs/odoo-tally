@@ -25,6 +25,7 @@ Developed and maintained by **[Scidecs](https://www.scidecs.com)**.
 4. [Entity & Table Mapping Reference](#4-entity--table-mapping-reference)
 5. [Source of Truth, Conflict Resolution & Echo Suppression](#5-source-of-truth-conflict-resolution--echo-suppression)
 6. [Troubleshooting & FAQ](#6-troubleshooting--faq)
+7. [Git Branches & Odoo App Store Compatibility](#7-git-branches--odoo-app-store-compatibility)
 
 ---
 
@@ -271,6 +272,23 @@ When Odoo pushes a record to Tally:
 
 #### Q: Does this module conflict with third-party custom modules?
 - **Fix**: No. All outbound hooks are wrapped in defensive `try...except` and guarded by `tally_no_sync` context flags. All mapping data is stored in dedicated tables without polluting standard Odoo models.
+
+---
+
+## 7. Git Branches & Odoo App Store Compatibility
+
+To ensure seamless indexing by the **Odoo App Store** crawler and smooth maintenance across versions:
+
+| Branch Name | Purpose | Target Odoo Version |
+| :--- | :--- | :--- |
+| **`main`** | **Primary Development Branch**. Contains latest stable code, CI tests, docs, and agent scripts. | Active Dev |
+| **`19.0`** | **Official Release Branch** for Odoo 19. Crawled by Odoo App Store (`version: 19.0.x.x.x`). | Odoo 19.0 |
+| **`20.0`** *(Upcoming)* | **Release Branch** for Odoo 20 compatibility once released. | Odoo 20.0 |
+
+### Branching Workflow:
+1. Developers work on `main` (or feature branches merged to `main`).
+2. When ready for release/update, `main` is fast-forwarded or merged into `19.0`.
+3. Odoo App Store automatically detects the update on branch `19.0` and makes it available to users.
 
 ---
 
