@@ -254,15 +254,28 @@ Every entity can be individually enabled/disabled with independent directional c
 - On each poll, the agent only requests records with `ALTERID > last_alterid`.
 - Successful processing updates `last_alterid` on `tally.entity.config`, ensuring high performance even on datasets with 100,000+ vouchers.
 
-### 2. SHA-256 Echo & Loop Suppression
-When Odoo pushes a record to Tally:
-1. The record is created/updated in Tally.
-2. Tally assigns a new `ALTERID` to the record.
-3. On the next poll, Tally returns this record as a "new change".
-4. The **Sync Engine** compares the record's SHA-256 hash (`content_hash`) and origin (`odoo`).
-5. Because the content hash matches and origin was Odoo, the echo is **suppressed immediately**, preventing infinite loop ping-pongs.
+### 2. SHA-256 Echo & Loop Suppression (Two-Way Closed Loop)
+When Odoo pushes a record to Tally or when an accountant posts an imported draft voucher in Odoo:
+1. **Outbound Registration**: When any record is enqueued from Odoo, `tally.mapping.register_outbound()` records `last_origin="odoo"` along with the SHA-256 hash of the payload.
+2. **Inbound Echo Drop**: When Tally returns the record on the next `ALTERID` poll, the Sync Engine verifies `last_origin == "odoo"` and matching content hash, dropping the echo immediately.
+3. **Manual Post-Back Guard**: Inbound invoices and vouchers from Tally enter Odoo as `draft`. When a user reviews and clicks **"Post"** in Odoo, `register_outbound()` checks if `last_origin == "tally"` and suppresses the outbound enqueue so Tally never receives a duplicate voucher.
 
-### 3. Conflict Resolution
+### 3. GST Tax Resolution & Invoice Matching
+- **Automated Tax Ledger Matching**: In Tally, Indian vouchers store GST as ledger entries (`CGST 9%`, `SGST 9%`, `IGST 18%`, `Output CGST`, `Duties & Taxes`).
+- **Odoo `account.tax` Mapping**: The engine parses tax rates/names, finds or creates the matching `account.tax` in Odoo, and attaches `tax_ids` directly to the invoice product lines.
+- **Supplementary Charges**: Non-tax adjustment ledgers (`Freight Charges`, `Discounts`, `Round Off`) are automatically appended as individual line items, guaranteeing 100% tax and invoice total fidelity with Tally.
+
+### 4. Double-Entry Journal & Contra Balancing
+- Tally journals and contras are automatically validated for double-entry balance ($\Sigma \text{Debit} = \Sigma \text{Credit}$).
+- If minor rounding discrepancies or adjustments occur, the engine creates a balancing line against `Rounding & Suspense Difference`, preventing Odoo from rejecting the entry upon posting.
+
+### 5. Multi-Tier Prioritized Master Matching
+To eliminate duplicate records from name variations or shared companies, master lookups follow a strict 3-tier resolution:
+1. **Tier 1 (GUID)**: Match against existing `tally.mapping` by unique Tally GUID.
+2. **Tier 2 (Government / Internal Identifier)**: Match by GSTIN / PAN (`res.partner.vat`) for parties, or Internal Reference / HSN for products.
+3. **Tier 3 (Scoped Name)**: Exact / case-insensitive name match scoped to the active company.
+
+### 6. Conflict Resolution
 - If an entity has direction `both` and changes occur simultaneously in both systems:
   - If **Source of Truth** is `Tally`, the Tally version overwrites Odoo.
   - If **Source of Truth** is `Odoo`, the Odoo version overwrites Tally.
