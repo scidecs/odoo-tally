@@ -57,9 +57,19 @@ Developed and maintained by **[Scidecs](https://www.scidecs.com)**.
 +-------------------------------------------------------------------+
 ```
 
-### Why this design?
-- **Zero Firewall Holes**: Tally runs on a local Windows PC/Server behind NAT. Odoo cloud instances cannot directly reach your LAN. The On-Premise Agent initiates **outbound-only HTTPS** to Odoo, polls Tally's AlterID cursor, and pushes/pulls XML.
-- **Non-Invasive**: No custom columns are added to core Odoo tables (`res.partner`, `account.move`, `product.product`). All IDs and watermarks live cleanly inside `tally.mapping`.
+### Key Architectural Advantages
+1. **Zero Client Disruption & Zero TDL Code**:
+   - No custom plugins, third-party software, or TDL (Tally Definition Language) code needed in Tally.
+   - Uses TallyPrime's built-in native XML server.
+   - Accountants continue working in Tally normally without changing habits.
+2. **Offline Resilience & Store-and-Forward Buffering**:
+   - **When the desktop is switched off or internet is down**: Sales, purchases, invoices, and payments created in Odoo are safely queued in PostgreSQL (`tally.sync.queue` with status `pending`).
+   - **When the computer is powered on**: The on-premise agent connects to Odoo, fetches the backlog in chronological sequence, and pushes it into Tally.
+   - **In reverse (Tally → Odoo)**: If vouchers are entered in Tally while offline, Tally's internal `ALTERID` watermark tracks the delta. As soon as the agent reconnects, all new entries are pulled into Odoo automatically.
+3. **Zero Firewall & Network Headaches**:
+   - Tally stays behind the office router without public IP exposure or port-forwarding. The agent communicates via outbound HTTPS to Odoo.
+4. **Non-Invasive to Odoo**:
+   - No custom columns or monkey-patching on core Odoo models (`res.partner`, `account.move`, etc.). Identity mappings live in `tally.mapping`. Outbound hooks are wrapped in defensive `try...except` so Tally errors never interrupt other custom modules.
 
 ---
 

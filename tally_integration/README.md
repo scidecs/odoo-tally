@@ -25,6 +25,7 @@ Developed and maintained by **[Scidecs](https://www.scidecs.com)**.
 4. [Entity & Table Mapping Reference](#4-entity--table-mapping-reference)
 5. [Source of Truth, Conflict Resolution & Echo Suppression](#5-source-of-truth-conflict-resolution--echo-suppression)
 6. [Troubleshooting & FAQ](#6-troubleshooting--faq)
+7. [Git Branches & Odoo App Store Compatibility](#7-git-branches--odoo-app-store-compatibility)
 
 ---
 
@@ -56,9 +57,19 @@ Developed and maintained by **[Scidecs](https://www.scidecs.com)**.
 +-------------------------------------------------------------------+
 ```
 
-### Why this design?
-- **Zero Firewall Holes**: Tally runs on a local Windows PC/Server behind NAT. Odoo cloud instances cannot directly reach your LAN. The On-Premise Agent initiates **outbound-only HTTPS** to Odoo, polls Tally's AlterID cursor, and pushes/pulls XML.
-- **Non-Invasive**: No custom columns are added to core Odoo tables (`res.partner`, `account.move`, `product.product`). All IDs and watermarks live cleanly inside `tally.mapping`.
+### Key Architectural Advantages
+1. **Zero Client Disruption & Zero TDL Code**:
+   - No custom plugins, third-party software, or TDL (Tally Definition Language) code needed in Tally.
+   - Uses TallyPrime's built-in native XML server.
+   - Accountants continue working in Tally normally without changing habits.
+2. **Offline Resilience & Store-and-Forward Buffering**:
+   - **When the desktop is switched off or internet is down**: Sales, purchases, invoices, and payments created in Odoo are safely queued in PostgreSQL (`tally.sync.queue` with status `pending`).
+   - **When the computer is powered on**: The on-premise agent connects to Odoo, fetches the backlog in chronological sequence, and pushes it into Tally.
+   - **In reverse (Tally → Odoo)**: If vouchers are entered in Tally while offline, Tally's internal `ALTERID` watermark tracks the delta. As soon as the agent reconnects, all new entries are pulled into Odoo automatically.
+3. **Zero Firewall & Network Headaches**:
+   - Tally stays behind the office router without public IP exposure or port-forwarding. The agent communicates via outbound HTTPS to Odoo.
+4. **Non-Invasive to Odoo**:
+   - No custom columns or monkey-patching on core Odoo models (`res.partner`, `account.move`, etc.). Identity mappings live in `tally.mapping`. Outbound hooks are wrapped in defensive `try...except` so Tally errors never interrupt other custom modules.
 
 ---
 
@@ -271,6 +282,23 @@ When Odoo pushes a record to Tally:
 
 #### Q: Does this module conflict with third-party custom modules?
 - **Fix**: No. All outbound hooks are wrapped in defensive `try...except` and guarded by `tally_no_sync` context flags. All mapping data is stored in dedicated tables without polluting standard Odoo models.
+
+---
+
+## 7. Git Branches & Odoo App Store Compatibility
+
+To ensure seamless indexing by the **Odoo App Store** crawler and smooth maintenance across versions:
+
+| Branch Name | Purpose | Target Odoo Version |
+| :--- | :--- | :--- |
+| **`main`** | **Primary Development Branch**. Contains latest stable code, CI tests, docs, and agent scripts. | Active Dev |
+| **`19.0`** | **Official Release Branch** for Odoo 19. Crawled by Odoo App Store (`version: 19.0.x.x.x`). | Odoo 19.0 |
+| **`20.0`** *(Upcoming)* | **Release Branch** for Odoo 20 compatibility once released. | Odoo 20.0 |
+
+### Branching Workflow:
+1. Developers work on `main` (or feature branches merged to `main`).
+2. When ready for release/update, `main` is fast-forwarded or merged into `19.0`.
+3. Odoo App Store automatically detects the update on branch `19.0` and makes it available to users.
 
 ---
 

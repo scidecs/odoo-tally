@@ -35,7 +35,7 @@ def compute_payload_hash(data):
 
 class SyncEngine:
     def __init__(self, env, instance):
-        self.env = env(context=dict(env.context, tally_sync_origin="tally", tally_no_sync=True))
+        self.env = env(context=dict(env.context, tally_sync_origin="tally", tally_no_sync=True), su=True)
         self.instance = instance
         self.company = instance.company_id
 
@@ -686,18 +686,6 @@ class SyncEngine:
             return "liability_current"
         return "expense"
 
-    def _generate_account_code(self, account_type):
-        """Generate next available account code based on type."""
-        prefix_map = {
-            "asset_receivable": "100",
-            "asset_cash": "101",
-            "asset_current": "102",
-            "liability_payable": "200",
-            "liability_current": "201",
-            "equity": "300",
-            "income": "400",
-            "expense": "500",
-        }
     def _account_company_domain(self):
         Account = self.env["account.account"]
         if "company_ids" in Account._fields:
