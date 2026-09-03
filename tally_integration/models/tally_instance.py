@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
+import logging
 import secrets
 
 from odoo import _, api, fields, models
+
+_logger = logging.getLogger(__name__)
+
 from .constants import DEFAULT_ENTITIES, direction_for_source
 
 
@@ -20,10 +24,39 @@ class TallyInstance(models.Model):
 
     # --- Tally endpoint (reached by the on-prem agent, not by Odoo directly) ---
     tally_host = fields.Char(
-        string="Tally Host", default="127.0.0.1",
-        help="Host/IP where the Tally XML gateway listens, as seen by the on-prem agent.",
+        string="Tally Host / IP", default="127.0.0.1",
+        help="IP or hostname of the Tally XML gateway. For cloud-hosted Tally this is its "
+             "public/routable address; for a local Tally, use the tunnel/proxy host.",
     )
     tally_port = fields.Integer(string="Tally Port", default=9000)
+    connection_mode = fields.Selection(
+        [("direct", "Direct — Odoo connects to Tally (no agent)"),
+         ("agent", "On-prem agent relays")],
+        string="Connection Mode", default="direct", required=True, tracking=True,
+        help="Direct: Odoo's scheduled job opens an HTTP connection to Tally's gateway "
+             "(use when Odoo can reach Tally over LAN / VPN / tunnel) — no extra process. "
+             "Agent: a thin on-prem process relays over outbound HTTPS (use on Odoo.sh when "
+             "the Tally LAN is otherwise unreachable).")
+    tally_protocol = fields.Selection(
+        [("http", "HTTP"), ("https", "HTTPS")], default="http", required=True,
+        string="Protocol",
+        help="Use HTTPS when Tally is fronted by a reverse proxy / tunnel that terminates TLS.")
+    tally_base_url = fields.Char(
+        string="Tally Base URL",
+        help="Optional. Full URL of the gateway (e.g. https://acme-tally.example.com, or an "
+             "ngrok / cloudflared URL). Overrides Host / Port / Protocol when set.")
+    tls_verify = fields.Boolean(string="Verify TLS", default=True)
+    auth_type = fields.Selection(
+        [("none", "None"), ("basic", "Basic Auth"), ("header", "Custom Header")],
+        string="Endpoint Auth", default="none", required=True,
+        help="Tally's gateway is unauthenticated. Put it behind a reverse proxy / tunnel that "
+             "requires Basic Auth or a secret header, and set the matching credential here.")
+    auth_username = fields.Char(string="Auth Username")
+    auth_password = fields.Char(
+        string="Auth Password", groups="tally_integration.group_tally_manager")
+    auth_header_name = fields.Char(string="Auth Header Name")
+    auth_header_value = fields.Char(
+        string="Auth Header Value", groups="tally_integration.group_tally_manager")
     tally_company = fields.Char(
         string="Tally Company",
         help="Exact name of the company open in TallyPrime.",
@@ -167,6 +200,34 @@ class TallyInstance(models.Model):
 
     def action_test_connection(self):
         self.ensure_one()
+        if self.connection_mode == "direct":
+            from ..services import tally_transport, tally_xml_builder, tally_xml_parser
+            try:
+                ep = self._tally_endpoint()
+                xml = tally_xml_builder.build_export_envelope("<COLLECTION><TYPE>Company</TYPE></COLLECTION>")
+                resp = tally_transport.post_xml(ep["url"], xml, auth=ep["auth"], extra_headers=ep["headers"], verify=ep["verify"], timeout=5)
+                root = tally_xml_parser.parse_tally_xml_root(resp)
+                return {
+                    "type": "ir.actions.client",
+                    "tag": "display_notification",
+                    "params": {
+                        "title": _("Connection Successful"),
+                        "message": _("Successfully connected directly to Tally gateway at %s.", ep["url"]),
+                        "type": "success",
+                        "sticky": False,
+                    },
+                }
+            except Exception as e:
+                return {
+                    "type": "ir.actions.client",
+                    "tag": "display_notification",
+                    "params": {
+                        "title": _("Connection Failed"),
+                        "message": _("Could not reach Tally at %s: %s", self._tally_endpoint()["url"], str(e)),
+                        "type": "danger",
+                        "sticky": True,
+                    },
+                }
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
@@ -214,6 +275,95 @@ class TallyInstance(models.Model):
             "context": {"default_instance_id": self.id},
         }
 
+    def _tally_endpoint(self):
+        """Resolve the Tally endpoint URL + auth + TLS options for this instance."""
+        self.ensure_one()
+        base = (self.tally_base_url or "").strip()
+        if base:
+            url = base.rstrip("/")
+        else:
+            proto = self.tally_protocol or "http"
+            url = "%s://%s:%s" % (proto, self.tally_host or "127.0.0.1", self.tally_port or 9000)
+        auth = None
+        headers = {}
+        if self.auth_type == "basic" and self.auth_username:
+            auth = (self.auth_username, self.auth_password or "")
+        elif self.auth_type == "header" and self.auth_header_name:
+            headers[self.auth_header_name] = self.auth_header_value or ""
+        return {"url": url, "auth": auth, "headers": headers, "verify": bool(self.tls_verify)}
+
+    # --------------------------------------------------------------- direct mode
+    def _direct_dispatch_queue(self, limit=100):
+        """POST pending outbound (Odoo -> Tally) queue items straight to Tally.
+
+        This is the agent-less path: Odoo itself performs the HTTP call, so no
+        separate on-prem process is required when Odoo can reach the gateway.
+        """
+        self.ensure_one()
+        from ..services import tally_transport
+        Queue = self.env["tally.sync.queue"]
+        items = Queue.search(
+            [("instance_id", "=", self.id), ("state", "=", "pending")],
+            order="create_date", limit=limit)
+        for item in items:
+            try:
+                ep = self._tally_endpoint()
+                resp = tally_transport.post_xml(ep["url"], item.payload, auth=ep["auth"], extra_headers=ep["headers"], verify=ep["verify"])
+                result = tally_transport.parse_import_response(resp)
+                if result["errors"]:
+                    item.write({"state": "failed", "attempts": item.attempts + 1,
+                                "error": result.get("line_error") or (resp or "")[:2000]})
+                else:
+                    item.write({"state": "acked", "attempts": item.attempts + 1})
+            except Exception as e:
+                item.write({"state": "failed", "attempts": item.attempts + 1, "error": str(e)})
+        return True
+
+    def action_pull_masters(self):
+        """Best-effort direct pull of master collections from Tally (no agent).
+
+        Voucher (day-book) export by date range is still pending; masters use
+        native Tally collections and feed the same sync engine.
+        """
+        self.ensure_one()
+        from ..services import tally_transport, tally_xml_builder, tally_xml_parser
+        from ..services.sync_engine import SyncEngine
+        parser_map = {
+            "group": tally_xml_parser.parse_groups_from_xml,
+            "account_ledger": tally_xml_parser.parse_ledgers_from_xml,
+            "ledger": tally_xml_parser.parse_ledgers_from_xml,
+            "uom": tally_xml_parser.parse_units_from_xml,
+            "stock_item": tally_xml_parser.parse_stock_items_from_xml,
+            "cost_centre": tally_xml_parser.parse_cost_centres_from_xml,
+            "godown": tally_xml_parser.parse_godowns_from_xml,
+        }
+        engine = SyncEngine(self.env, self)
+        pulled = 0
+        for cfg in self.entity_config_ids.filtered(
+                lambda c: c.enabled and c.direction in ("tally_to_odoo", "both")):
+            ctype = tally_xml_builder.COLLECTION_MAP.get(cfg.entity)
+            pfn = parser_map.get(cfg.entity)
+            if not ctype or not pfn:
+                continue
+            try:
+                xml = tally_xml_builder.build_collection_export(ctype, company_name=self.tally_company)
+                ep = self._tally_endpoint()
+                resp = tally_transport.post_xml(ep["url"], xml, auth=ep["auth"], extra_headers=ep["headers"], verify=ep["verify"])
+                root = tally_xml_parser.parse_tally_xml_root(resp)
+                records = pfn(root) if root is not None else []
+                if records:
+                    engine.process_inbound_batch(cfg.entity, records)
+                    pulled += len(records)
+            except Exception as e:
+                self.env["tally.sync.log"].log(
+                    self, "tally_to_odoo", cfg.entity, "error", "Direct pull failed: %s" % e)
+        return {
+            "type": "ir.actions.client", "tag": "display_notification",
+            "params": {"title": _("Direct pull complete"),
+                       "message": _("Pulled %s master record(s) from Tally.") % pulled,
+                       "type": "success", "sticky": False},
+        }
+
     # ------------------------------------------------------------------ cron
     @api.model
     def _cron_health_check(self):
@@ -224,4 +374,15 @@ class TallyInstance(models.Model):
             ("agent_last_seen", "<", threshold),
         ])
         stale.write({"state": "offline"})
+        return True
+
+    @api.model
+    def _cron_direct_sync(self):
+        """Drain outbound queues for all direct-mode instances (agent-less push)."""
+        instances = self.search([("active", "=", True), ("connection_mode", "=", "direct")])
+        for inst in instances:
+            try:
+                inst._direct_dispatch_queue()
+            except Exception as e:
+                _logger.warning("Direct sync failed for instance %s: %s", inst.id, e)
         return True

@@ -28,6 +28,10 @@
                 <header>
                     <button name="action_test_connection" type="object"
                             string="Test Connection" icon="fa-plug"/>
+                    <button name="action_pull_masters" type="object"
+                            string="Pull Masters from Tally" icon="fa-download"
+                            invisible="connection_mode != 'direct'"
+                            groups="tally_integration.group_tally_manager"/>
                     <button name="action_open_onboarding" type="object"
                             string="Start Onboarding" icon="fa-rocket"
                             groups="tally_integration.group_tally_manager"/>
@@ -60,11 +64,20 @@
                             <field name="tally_company"/>
                             <field name="tally_host"/>
                             <field name="tally_port"/>
+                            <field name="tally_protocol"/>
+                            <field name="tally_base_url" placeholder="https://acme-tally.example.com (optional; overrides host/port)"/>
+                            <field name="tls_verify" invisible="tally_protocol == 'http' and not tally_base_url"/>
+                            <field name="auth_type"/>
+                            <field name="auth_username" invisible="auth_type != 'basic'"/>
+                            <field name="auth_password" password="True" invisible="auth_type != 'basic'"/>
+                            <field name="auth_header_name" invisible="auth_type != 'header'"/>
+                            <field name="auth_header_value" password="True" invisible="auth_type != 'header'"/>
                             <field name="company_id" groups="base.group_multi_company"/>
                         </group>
                         <group string="Sync Policy">
                             <field name="odoo_edition"/>
                             <field name="odoo_role"/>
+                            <field name="connection_mode"/>
                             <field name="tally_inventory"/>
                             <field name="default_source"/>
                             <field name="poll_interval"/>

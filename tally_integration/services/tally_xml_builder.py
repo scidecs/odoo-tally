@@ -380,3 +380,40 @@ def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
 {led_entries_str}
   </VOUCHER>
 </TALLYMESSAGE>"""
+
+
+# ==============================================================================
+# EXPORT REQUESTS (direct-mode master pull)
+# ==============================================================================
+
+# entity -> native Tally collection object name
+COLLECTION_MAP = {
+    "group": "Group",
+    "account_ledger": "Ledger",
+    "ledger": "Ledger",
+    "uom": "Unit",
+    "stock_item": "StockItem",
+    "cost_centre": "CostCentre",
+    "godown": "Godown",
+}
+
+
+def build_collection_export(collection_type, company_name=None):
+    """Build a Tally 'Export Collection' request for a native object type."""
+    company_tag = (f"<SVCURRENTCOMPANY>{xml_escape(company_name)}</SVCURRENTCOMPANY>"
+                   if company_name else "")
+    return f"""<ENVELOPE>
+  <HEADER>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Collection</TYPE>
+    <ID>{xml_escape(collection_type)}</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        {company_tag}
+      </STATICVARIABLES>
+    </DESC>
+  </BODY>
+</ENVELOPE>"""
