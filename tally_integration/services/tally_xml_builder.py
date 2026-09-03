@@ -29,24 +29,28 @@ def format_tally_date(dt):
     return clean
 
 
-def wrap_import_envelope(tally_messages, company_name=None):
+def wrap_import_envelope(tally_messages, company_name=None, report_type="All Masters"):
     """Wrap one or more <TALLYMESSAGE> items inside a valid Tally import envelope."""
     body_content = "\n".join(tally_messages)
-    company_tag = f"<STATICVARIABLES><SVCURRENTCOMPANY>{xml_escape(company_name)}</SVCURRENTCOMPANY></STATICVARIABLES>" if company_name else ""
+    company_tag = (f"<SVCURRENTCOMPANY>{xml_escape(company_name)}</SVCURRENTCOMPANY>"
+                   if company_name else "")
     return f"""<ENVELOPE>
   <HEADER>
-    <TALLYREQUEST>Import Data</TALLYREQUEST>
+    <VERSION>1</VERSION>
+    <TALLYREQUEST>Import</TALLYREQUEST>
+    <TYPE>Data</TYPE>
+    <ID>{xml_escape(report_type)}</ID>
   </HEADER>
   <BODY>
-    <IMPORTDATA>
-      <REQUESTDESC>
-        <REPORTNAME>All Masters</REPORTNAME>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
         {company_tag}
-      </REQUESTDESC>
-      <REQUESTDATA>
+      </STATICVARIABLES>
+    </DESC>
+    <DATA>
 {body_content}
-      </REQUESTDATA>
-    </IMPORTDATA>
+    </DATA>
   </BODY>
 </ENVELOPE>"""
 
@@ -208,11 +212,13 @@ def build_stock_item_xml(name, base_uom="Nos", parent_group="Primary", hsn_code=
     <OPENINGRATE>{float(opening_rate):.2f}</OPENINGRATE>
     <OPENINGVALUE>-{op_val:.2f}</OPENINGVALUE>""" if opening_qty else ""
 
+    parent_tag = f"<PARENT>{xml_escape(parent_group)}</PARENT>" if parent_group and parent_group != "Primary" else ""
+
     return f"""<TALLYMESSAGE xmlns:UDF="TallyUDF">
   <STOCKITEM NAME="{xml_escape(name)}" ACTION="Create">
     {guid_tag}
     <NAME>{xml_escape(name)}</NAME>
-    <PARENT>{xml_escape(parent_group or 'Primary')}</PARENT>
+    {parent_tag}
     <BASEUNITS>{xml_escape(base_uom or 'Nos')}</BASEUNITS>
     {hsn_tag}
     {gst_tag}

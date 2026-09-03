@@ -371,15 +371,10 @@ class SyncEngine:
         if not name:
             return False
         Uom = self.env["uom.uom"]
-        rec = Uom.search([("name", "=", name)], limit=1)
+        rec = Uom.search([("name", "=ilike", name)], limit=1)
         if not rec:
-            cat = self.env["uom.category"].search([("name", "=", name)], limit=1)
-            if not cat:
-                cat = self.env["uom.category"].create({"name": name})
             rec = Uom.create({
                 "name": name,
-                "category_id": cat.id,
-                "uom_type": "reference",
                 "rounding": 1.0 / (10 ** int(data.get("decimal_places") or 0)),
             })
         return rec

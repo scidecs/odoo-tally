@@ -63,7 +63,7 @@ class AccountPayment(models.Model):
                 is_invoice=False,
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
-                [msg_xml], company_name=instance.tally_company)
+                [msg_xml], company_name=instance.tally_company, report_type="Vouchers")
 
             should_enqueue = self.env["tally.mapping"].register_outbound(
                 instance=instance,

@@ -52,7 +52,8 @@ class AccountMove(models.Model):
             inventory_entries = []
 
             # Party line (Receivable / Payable)
-            party_amt = self.amount_total if entity in ("sales", "debit_note") else -self.amount_total
+            is_debit_party = entity in ("sales", "debit_note")
+            party_amt = -self.amount_total if is_debit_party else self.amount_total
             ledger_entries.append({
                 "ledger": party_name,
                 "amount": party_amt,
@@ -63,29 +64,21 @@ class AccountMove(models.Model):
                 }],
             })
 
+            default_acc = "Sales Account" if is_debit_party else "Purchase Account"
             for line in self.invoice_line_ids:
-                # In an "accounts only" Tally company, push item lines as ledger
-                # entries (revenue/expense account), never inventory entries.
-                if line.product_id and not accounts_only:
-                    inventory_entries.append({
-                        "item": line.product_id.name,
-                        "qty": line.quantity,
-                        "rate": line.price_unit,
-                        "amount": line.price_subtotal,
-                        "uom": line.product_uom_id.name if line.product_uom_id else "Nos",
-                        "discount": line.discount,
-                    })
-                else:
-                    acc_name = (line.account_id.name if line.account_id else None) or "Sales"
-                    ledger_entries.append({
-                        "ledger": acc_name,
-                        "amount": -line.price_subtotal if entity in ("sales", "debit_note") else line.price_subtotal,
-                    })
+                acc_name = (line.account_id.name if line.account_id else None) or default_acc
+                line_amt = line.price_subtotal if is_debit_party else -line.price_subtotal
+                ledger_entries.append({
+                    "ledger": acc_name,
+                    "amount": line_amt,
+                })
 
             for tax_line in self.line_ids.filtered(lambda l: l.tax_line_id):
+                tax_acc = tax_line.name or (tax_line.account_id.name if tax_line.account_id else "Duties & Taxes")
+                tax_amt = tax_line.balance if is_debit_party else -tax_line.balance
                 ledger_entries.append({
-                    "ledger": tax_line.name or (tax_line.account_id.name if tax_line.account_id else "Tax"),
-                    "amount": -tax_line.balance if entity in ("sales", "debit_note") else tax_line.balance,
+                    "ledger": tax_acc,
+                    "amount": tax_amt,
                 })
 
             msg_xml = tally_xml_builder.build_voucher_xml(
@@ -100,7 +93,7 @@ class AccountMove(models.Model):
                 is_invoice=(self.move_type != "entry"),
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
-                [msg_xml], company_name=instance.tally_company)
+                [msg_xml], company_name=instance.tally_company, report_type="Vouchers")
 
             should_enqueue = self.env["tally.mapping"].register_outbound(
                 instance=instance,

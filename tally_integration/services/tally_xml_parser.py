@@ -46,14 +46,17 @@ def _parse_tally_date(date_str):
 
 
 def parse_tally_xml_root(xml_content):
-    """Parse raw XML string into an ElementTree root."""
+    """Parse raw XML string into an ElementTree root, sanitizing Tally control entities."""
     if not xml_content or not xml_content.strip():
         return None
+    # Sanitize invalid XML control characters & numeric entity codes (e.g. &#4; used by Tally for system records)
+    clean_xml = re.sub(r"&#0*([0-8]|1[1-2]|1[4-9]|2[0-9]|3[0-1]);", "", xml_content)
+    clean_xml = re.sub(r"&#x0*([0-8BbCcEeFf]|1[0-9A-Fa-f]);", "", clean_xml)
     try:
-        return ET.fromstring(xml_content)
-    except Exception as e:
+        return ET.fromstring(clean_xml)
+    except Exception:
         # Try stripping leading/trailing junk
-        clean_xml = xml_content.strip()
+        clean_xml = clean_xml.strip()
         idx = clean_xml.find("<ENVELOPE")
         if idx != -1:
             clean_xml = clean_xml[idx:]
