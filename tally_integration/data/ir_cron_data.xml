@@ -30,5 +30,14 @@
             <field name="interval_type">days</field>
             <field name="active" eval="True"/>
         </record>
+        <record id="cron_tally_prune_logs" model="ir.cron">
+            <field name="name">Tally: prune old sync logs (daily)</field>
+            <field name="model_id" ref="model_tally_instance"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_prune_logs()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
     </data>
 </odoo>

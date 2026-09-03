@@ -63,6 +63,13 @@ class TallyInstance(models.Model):
         string="Auto-post Imported Vouchers", default=True,
         help="Post imported invoices / payments / journals automatically. Any that do not "
              "balance are left in draft for review.")
+    verbose_logging = fields.Boolean(
+        string="Full (per-record) Logging", default=True,
+        help="Log every individual record moving in or out. Turn off for a lighter, "
+             "batch-summary-only log at very high volume.")
+    log_retention_days = fields.Integer(
+        string="Log Retention (days)", default=90,
+        help="Sync logs older than this are pruned automatically. 0 disables pruning.")
     direct_auto_pull = fields.Boolean(
         string="Auto-pull on Schedule", default=True,
         help="In direct mode, the scheduled job also pulls masters and vouchers FROM Tally, "
@@ -145,6 +152,9 @@ class TallyInstance(models.Model):
     mapping_count = fields.Integer(compute="_compute_counts")
     log_count = fields.Integer(compute="_compute_counts")
     queue_pending = fields.Integer(compute="_compute_counts")
+    queue_failed = fields.Integer(compute="_compute_counts")
+    orphan_count = fields.Integer(compute="_compute_counts")
+    synced_today = fields.Integer(string="Synced Today", compute="_compute_counts")
 
     _name_company_uniq = models.Constraint(
         "UNIQUE(name, company_id)",
@@ -160,6 +170,15 @@ class TallyInstance(models.Model):
             rec.log_count = log.search_count([("instance_id", "=", rec.id)])
             rec.queue_pending = queue.search_count(
                 [("instance_id", "=", rec.id), ("state", "in", ("pending", "sent"))])
+            rec.queue_failed = queue.search_count(
+                [("instance_id", "=", rec.id), ("state", "=", "failed")])
+            rec.orphan_count = mapping.search_count(
+                [("instance_id", "=", rec.id), ("is_orphan", "=", True)])
+            rec.synced_today = log.search_count([
+                ("instance_id", "=", rec.id),
+                ("create_date", ">=", fields.Datetime.to_string(
+                    fields.Datetime.now().replace(hour=0, minute=0, second=0, microsecond=0))),
+                ("status", "!=", "error")])
 
     # ------------------------------------------------------------------ edition
     @api.model
@@ -278,6 +297,38 @@ class TallyInstance(models.Model):
             "context": {"default_instance_id": self.id},
         }
 
+    def action_view_queue(self, state=None):
+        self.ensure_one()
+        domain = [("instance_id", "=", self.id)]
+        if state == "failed":
+            domain.append(("state", "=", "failed"))
+        elif state == "pending":
+            domain += [("state", "in", ("pending", "sent"))]
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Outbound Queue"),
+            "res_model": "tally.sync.queue",
+            "view_mode": "list,form",
+            "domain": domain,
+            "context": {"default_instance_id": self.id},
+        }
+
+    def action_view_queue_pending(self):
+        return self.action_view_queue(state="pending")
+
+    def action_view_queue_failed(self):
+        return self.action_view_queue(state="failed")
+
+    def action_view_orphans(self):
+        self.ensure_one()
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Orphans (Deleted in Tally)"),
+            "res_model": "tally.mapping",
+            "view_mode": "list,form",
+            "domain": [("instance_id", "=", self.id), ("is_orphan", "=", True)],
+        }
+
     def action_view_logs(self):
         self.ensure_one()
         return {
@@ -326,6 +377,25 @@ class TallyInstance(models.Model):
             vals["agent_last_seen"] = fields.Datetime.now()
         self.write(vals)
 
+    def _log_outbound(self, item, ok, error=None):
+        """Per-record log of an Odoo -> Tally send (gated by verbose_logging)."""
+        if not self.verbose_logging:
+            return
+        name = item.idempotency_key or (item.odoo_model_name or "record")
+        try:
+            if item.odoo_model_name and item.odoo_res_id:
+                rec = self.env[item.odoo_model_name].browse(item.odoo_res_id)
+                if rec.exists():
+                    name = rec.display_name
+        except Exception:
+            pass
+        self.env["tally.sync.log"].log(
+            self, "odoo_to_tally", item.entity,
+            "success" if ok else "error",
+            (_("Sent %s to Tally") % name) if ok else (_("Failed sending %s to Tally") % name),
+            record_name=name, odoo_model_name=item.odoo_model_name,
+            odoo_res_id=item.odoo_res_id, detail=error, record_count=1)
+
     def _direct_dispatch_queue(self, limit=100, batch_size=25):
         """POST pending/failed outbound (Odoo -> Tally) queue items straight to Tally.
 
@@ -367,14 +437,17 @@ class TallyInstance(models.Model):
                 if result["errors"]:
                     item.write({"state": "failed", "attempts": item.attempts + 1,
                                 "error": result.get("line_error") or (resp or "")[:2000]})
+                    self._log_outbound(item, False, error=result.get("line_error"))
                 else:
                     item.write({"state": "acked", "attempts": item.attempts + 1, "error": False})
+                    self._log_outbound(item, True)
             except TallyTransportError as e:
                 contacted = False
                 item.write({"state": "failed", "attempts": item.attempts + 1, "error": str(e)})
                 raise
             except Exception as e:
                 item.write({"state": "failed", "attempts": item.attempts + 1, "error": str(e)})
+                self._log_outbound(item, False, error=str(e))
 
         # Group items by report_type for batch packaging
         by_report_type = {}
@@ -417,6 +490,7 @@ class TallyInstance(models.Model):
                         # Whole batch succeeded!
                         for it in batch:
                             it.write({"state": "acked", "attempts": it.attempts + 1, "error": False})
+                            self._log_outbound(it, True)
                     else:
                         # Fallback to single item dispatch to isolate which one had errors
                         for it in batch:
@@ -714,4 +788,18 @@ class TallyInstance(models.Model):
                 inst._reconcile_tally_deletions()
             except Exception as e:
                 _logger.warning("Scheduled deletion reconcile failed for instance %s: %s", inst.id, e)
+        return True
+
+    @api.model
+    def _cron_prune_logs(self):
+        """Delete sync logs older than each instance's retention window."""
+        Log = self.env["tally.sync.log"]
+        for inst in self.search([]):
+            days = inst.log_retention_days or 0
+            if days <= 0:
+                continue
+            cutoff = fields.Datetime.subtract(fields.Datetime.now(), days=days)
+            old = Log.search([("instance_id", "=", inst.id), ("create_date", "<", cutoff)])
+            if old:
+                old.unlink()
         return True

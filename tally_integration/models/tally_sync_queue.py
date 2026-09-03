@@ -30,3 +30,16 @@ class TallySyncQueue(models.Model):
     def action_retry(self):
         self.write({"state": "pending", "error": False})
         return True
+
+    def action_open_record(self):
+        """Open the Odoo record this queued item was built from."""
+        self.ensure_one()
+        if not (self.odoo_model_name and self.odoo_res_id):
+            return False
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": self.odoo_model_name,
+            "res_id": self.odoo_res_id,
+            "view_mode": "form",
+            "target": "current",
+        }

@@ -171,6 +171,14 @@ class SyncEngine:
                             origin="tally",
                         )
                         self._maybe_autopost(entity, odoo_record)
+                        if getattr(self.instance, "verbose_logging", True):
+                            nm = (rec.get("name") or rec.get("voucher_number")
+                                  or odoo_record.display_name)
+                            self.env["tally.sync.log"].log(
+                                self.instance, "tally_to_odoo", entity, "success",
+                                _("Imported %s") % nm, record_name=nm,
+                                odoo_model_name=odoo_record._name, odoo_res_id=odoo_record.id,
+                                tally_guid=guid, record_count=1)
             except Exception as e:
                 errors += 1
                 _logger.exception("Error upserting %s: %s", entity, e)
@@ -191,12 +199,16 @@ class SyncEngine:
             if target_aid > cfg.last_alterid:
                 cfg.write({"last_alterid": target_aid, "last_sync": fields.Datetime.now()})
 
-        self.env["tally.sync.log"].log(
-            self.instance, "tally_to_odoo", entity,
-            "success" if errors == 0 else "warning",
-            f"Processed {processed} record(s), {errors} error(s) for {entity}",
-            detail=f"AlterID watermark={cfg.last_alterid if cfg else max_alterid}"
-        )
+        # In verbose mode each record is logged individually; only emit a batch
+        # summary when verbose logging is off (keeps movement counts un-doubled).
+        if not getattr(self.instance, "verbose_logging", True):
+            self.env["tally.sync.log"].log(
+                self.instance, "tally_to_odoo", entity,
+                "success" if errors == 0 else "warning",
+                f"Processed {processed} record(s), {errors} error(s) for {entity}",
+                detail=f"AlterID watermark={cfg.last_alterid if cfg else max_alterid}",
+                record_count=processed,
+            )
 
         return {"processed": processed, "errors": errors, "watermark": max_alterid}
 
