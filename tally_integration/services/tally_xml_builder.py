@@ -425,6 +425,7 @@ def build_collection_export(collection_type, company_name=None, from_alterid=Non
       </TDL>"""
     return f"""<ENVELOPE>
   <HEADER>
+    <VERSION>1</VERSION>
     <TALLYREQUEST>Export</TALLYREQUEST>
     <TYPE>Collection</TYPE>
     <ID>{xml_escape(coll_id)}</ID>
@@ -446,6 +447,7 @@ def build_voucher_export(from_date, to_date, company_name=None):
                    if company_name else "")
     return f"""<ENVELOPE>
   <HEADER>
+    <VERSION>1</VERSION>
     <TALLYREQUEST>Export</TALLYREQUEST>
     <TYPE>Data</TYPE>
     <ID>Day Book</ID>
