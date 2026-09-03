@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
-from odoo import models
+from odoo import fields, models
 
 
 class ResConfigSettings(models.TransientModel):
-    """Reserved for future global settings. Company-level source-of-truth is
-    configured on the company form (see res_company + res_company view inherit)."""
     _inherit = "res.config.settings"
+
+    tally_default_source = fields.Selection(
+        related="company_id.tally_default_source",
+        readonly=False,
+        string="Default Source of Truth",
+        help="Which system wins on conflict by default. Tally is the accounting "
+             "system, so it is authoritative unless an entity overrides this.",
+    )

@@ -1,27 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <menuitem id="menu_tally_root" name="Tally Sync"
-              sequence="90" groups="group_tally_user"/>
+    <menuitem id="menu_tally_root" name="Tally Prime"
+              web_icon="tally_integration,static/description/icon.png"
+              sequence="20" groups="group_tally_user"/>
 
-    <menuitem id="menu_tally_instances" name="Instances"
+    <menuitem id="menu_tally_instances" name="Dashboard &amp; Instances"
               parent="menu_tally_root" action="action_tally_instance" sequence="10"/>
 
-    <menuitem id="menu_tally_monitoring" name="Monitoring"
+    <menuitem id="menu_tally_monitoring" name="Operations"
               parent="menu_tally_root" sequence="20"/>
-    <menuitem id="menu_tally_sync_log" name="Sync Logs"
-              parent="menu_tally_monitoring" action="action_tally_sync_log" sequence="10"/>
-    <menuitem id="menu_tally_mapping" name="Mappings"
-              parent="menu_tally_monitoring" action="action_tally_mapping" sequence="20"/>
     <menuitem id="menu_tally_queue" name="Outbound Queue"
-              parent="menu_tally_monitoring" action="action_tally_sync_queue" sequence="30"/>
+              parent="menu_tally_monitoring" action="action_tally_sync_queue" sequence="10"/>
+    <menuitem id="menu_tally_sync_log" name="Sync Logs"
+              parent="menu_tally_monitoring" action="action_tally_sync_log" sequence="20"/>
+    <menuitem id="menu_tally_mapping" name="Identity Mappings"
+              parent="menu_tally_monitoring" action="action_tally_mapping" sequence="30"/>
 
     <menuitem id="menu_tally_config" name="Configuration"
-              parent="menu_tally_root" sequence="90"
+              parent="menu_tally_root" sequence="30"
               groups="group_tally_manager"/>
+    <menuitem id="menu_tally_config_settings" name="Settings"
+              parent="menu_tally_config" action="action_tally_config_settings" sequence="5"/>
     <menuitem id="menu_tally_config_entities" name="Entity Configuration"
               parent="menu_tally_config" action="action_tally_entity_config" sequence="10"/>
     <menuitem id="menu_tally_config_account_type" name="Account Type Mapping"
               parent="menu_tally_config" action="action_tally_account_type_map" sequence="20"/>
     <menuitem id="menu_tally_config_discovered" name="Discovered Companies"
               parent="menu_tally_config" action="action_tally_discovered_company" sequence="30"/>
+
+    <!-- Shortcuts under Invoicing / Accounting -> Configuration -->
+    <menuitem id="menu_tally_account_root" name="Tally Integration"
+              parent="account.menu_finance_configuration" sequence="85"
+              groups="group_tally_user"/>
+    <menuitem id="menu_tally_account_instances" name="Tally Instances"
+              parent="menu_tally_account_root" action="action_tally_instance" sequence="10"/>
+    <menuitem id="menu_tally_account_logs" name="Sync Logs"
+              parent="menu_tally_account_root" action="action_tally_sync_log" sequence="20"/>
+    <menuitem id="menu_tally_account_mappings" name="Identity Mappings"
+              parent="menu_tally_account_root" action="action_tally_mapping" sequence="30"/>
 </odoo>

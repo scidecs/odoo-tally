@@ -1,7 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Company-form inherit (mirrors hos_base / sims_base). Global source-of-truth
-         default plus a shortcut to the Tally instances. -->
+    <!-- Dedicated App Block in General Settings -->
+    <record id="res_config_settings_view_form_tally" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.tally</field>
+        <field name="model">res.config.settings</field>
+        <field name="priority" eval="70"/>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Tally Prime" string="Tally Prime" name="tally_integration" groups="tally_integration.group_tally_manager">
+                    <block title="Source of Truth &amp; Conflict Policy" name="tally_sot_setting_container">
+                        <setting id="tally_default_source_setting" string="Default Source of Truth" help="Determines the winning system when data is changed simultaneously in both Odoo and Tally.">
+                            <field name="tally_default_source"/>
+                        </setting>
+                    </block>
+                    <block title="TallyPrime Connections &amp; Deployment" name="tally_connections_container">
+                        <setting id="tally_instances_setting" string="Tally Instances" help="Manage connection endpoints, direct HTTP gateway, agent tokens, and multi-company pairs.">
+                            <div class="mt8">
+                                <button name="%(action_tally_instance)d" type="action" string="Manage Tally Instances" class="btn btn-primary" icon="fa-arrow-right"/>
+                            </div>
+                        </setting>
+                        <setting id="tally_mappings_setting" string="Account Type Mapping" help="Map Tally group hierarchies (Sundry Debtors, Bank Accounts) to Odoo 19 Account Types.">
+                            <div class="mt8">
+                                <button name="%(action_tally_account_type_map)d" type="action" string="Configure Account Mappings" class="btn btn-secondary" icon="fa-table"/>
+                            </div>
+                        </setting>
+                    </block>
+                    <block title="Monitoring &amp; Audit Logs" name="tally_monitoring_container">
+                        <setting id="tally_logs_setting" string="Sync Logs &amp; Identity Mappings" help="Real-time audit log of all master and voucher transactions between Odoo and Tally.">
+                            <div class="mt8">
+                                <button name="%(action_tally_sync_log)d" type="action" string="View Sync Logs" class="btn btn-outline-primary me-2" icon="fa-history"/>
+                                <button name="%(action_tally_mapping)d" type="action" string="View Identity Mappings" class="btn btn-outline-secondary" icon="fa-link"/>
+                            </div>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Settings Window Action for Tally Settings menu -->
+    <record id="action_tally_config_settings" model="ir.actions.act_window">
+        <field name="name">Settings</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="target">current</field>
+        <field name="context">{'module': 'tally_integration', 'bin_size': False}</field>
+    </record>
+
+    <!-- Company-form inherit -->
     <record id="view_company_form_tally" model="ir.ui.view">
         <field name="name">res.company.form.inherit.tally</field>
         <field name="model">res.company</field>
