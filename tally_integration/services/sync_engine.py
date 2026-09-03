@@ -259,8 +259,6 @@ class SyncEngine:
         if rec:
             rec.write(vals)
         else:
-            # Code prefix generated if needed
-            vals["code_prefix_start"] = name[:4].upper()
             rec = Group.create(vals)
         return rec
 
