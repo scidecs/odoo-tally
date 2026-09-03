@@ -78,10 +78,22 @@ class AccountMove(models.Model):
                 for line in self.invoice_line_ids:
                     acc_name = (line.account_id.name if line.account_id else None) or default_acc
                     line_amt = line.price_subtotal if is_debit_party else -line.price_subtotal
-                    ledger_entries.append({
-                        "ledger": acc_name,
-                        "amount": line_amt,
-                    })
+
+                    if line.product_id and not accounts_only:
+                        inventory_entries.append({
+                            "item": line.product_id.name,
+                            "qty": line.quantity,
+                            "rate": line.price_unit,
+                            "amount": line_amt,
+                            "uom": line.product_uom_id.name if line.product_uom_id else "Nos",
+                            "discount": getattr(line, "discount", 0.0),
+                            "account_ledger": acc_name,
+                        })
+                    else:
+                        ledger_entries.append({
+                            "ledger": acc_name,
+                            "amount": line_amt,
+                        })
 
                 for tax_line in self.line_ids.filtered(lambda l: l.tax_line_id):
                     tax_acc = tax_line.name or (tax_line.account_id.name if tax_line.account_id else "Duties & Taxes")

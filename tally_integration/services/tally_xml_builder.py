@@ -316,6 +316,16 @@ def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
             <BILLEDQTY>{qty:.2f} {xml_escape(uom)}</BILLEDQTY>
           </BATCHALLOCATIONS.LIST>"""
 
+            acc_ledger = inv.get("account_ledger")
+            acc_alloc_xml = ""
+            if acc_ledger:
+                acc_alloc_xml = f"""
+          <ACCOUNTINGALLOCATIONS.LIST>
+            <LEDGERNAME>{xml_escape(acc_ledger)}</LEDGERNAME>
+            <ISDEEMEDPOSITIVE>{'Yes' if amount < 0 else 'No'}</ISDEEMEDPOSITIVE>
+            <AMOUNT>{amount:.2f}</AMOUNT>
+          </ACCOUNTINGALLOCATIONS.LIST>"""
+
             inv_xml.append(f"""        <ALLINVENTORYENTRIES.LIST>
           <STOCKITEMNAME>{xml_escape(item_name)}</STOCKITEMNAME>
           <ISDEEMEDPOSITIVE>{'Yes' if amount < 0 else 'No'}</ISDEEMEDPOSITIVE>
@@ -324,7 +334,7 @@ def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
           <ACTUALQTY>{qty:.2f} {xml_escape(uom)}</ACTUALQTY>
           <BILLEDQTY>{qty:.2f} {xml_escape(uom)}</BILLEDQTY>
           {disc_tag}
-          {batch_xml}
+          {batch_xml}{acc_alloc_xml}
         </ALLINVENTORYENTRIES.LIST>""")
 
     inv_entries_str = "\n".join(inv_xml)
