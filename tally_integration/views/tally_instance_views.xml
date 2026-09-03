@@ -184,75 +184,53 @@
         <field name="name">tally.instance.kanban</field>
         <field name="model">tally.instance</field>
         <field name="arch" type="xml">
-            <kanban class="o_kanban_dashboard">
-                <field name="state"/>
-                <field name="odoo_edition"/>
-                <field name="odoo_role"/>
-                <field name="connection_mode"/>
-                <field name="tally_company"/>
-                <field name="queue_pending"/>
-                <field name="queue_failed"/>
-                <field name="orphan_count"/>
-                <field name="synced_today"/>
-                <field name="last_pull"/>
+            <kanban class="o_kanban_dashboard" sample="1">
                 <templates>
                     <t t-name="card">
-                        <div class="o_kanban_card_header">
-                            <div class="o_kanban_card_header_title">
-                                <div class="o_primary">
-                                    <field name="name"/>
-                                </div>
-                                <div class="o_secondary text-muted">
-                                    <t t-esc="record.tally_company.value or ''"/>
-                                </div>
-                            </div>
-                            <div class="o_kanban_card_header_right">
-                                <span t-attf-class="badge #{record.state.raw_value == 'online' ? 'text-bg-success' : (record.state.raw_value == 'offline' ? 'text-bg-danger' : 'text-bg-secondary')}">
-                                    <field name="state"/>
-                                </span>
-                            </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <field name="name" class="fw-bold fs-5 me-auto"/>
+                            <field name="state" widget="badge"
+                                   decoration-success="state == 'online'"
+                                   decoration-danger="state == 'offline'"
+                                   decoration-secondary="state == 'draft'"/>
                         </div>
-                        <div class="container o_kanban_card_content mt-2">
-                            <div class="row">
-                                <div class="col-6 text-muted">
-                                    <t t-esc="record.odoo_edition.value"/> · <field name="odoo_role"/>
-                                </div>
-                                <div class="col-6 text-end text-muted">
-                                    <field name="connection_mode"/>
-                                </div>
-                            </div>
-                            <div class="row mt-2">
-                                <div class="col-4">
-                                    <button class="btn btn-link p-0" name="action_view_queue_pending" type="object">
-                                        <span class="o_value"><field name="queue_pending"/></span> Pending
-                                    </button>
-                                </div>
-                                <div class="col-4">
-                                    <button class="btn btn-link p-0 text-danger" name="action_view_queue_failed" type="object">
-                                        <span class="o_value"><field name="queue_failed"/></span> Failed
-                                    </button>
-                                </div>
-                                <div class="col-4">
-                                    <button class="btn btn-link p-0 text-warning" name="action_view_orphans" type="object">
-                                        <span class="o_value"><field name="orphan_count"/></span> Orphans
-                                    </button>
+                        <div class="text-muted mb-2">
+                            <field name="tally_company" class="fw-semibold"/>
+                            <span class="mx-1">•</span>
+                            <field name="connection_mode"/>
+                            <span class="mx-1">•</span>
+                            <field name="odoo_role"/>
+                        </div>
+                        <div class="row g-2 text-center my-2">
+                            <div class="col-4">
+                                <div class="border rounded p-2 bg-light">
+                                    <div class="text-muted small">Pending</div>
+                                    <div class="fw-bold fs-5"><field name="queue_pending"/></div>
                                 </div>
                             </div>
-                            <div class="row mt-2">
-                                <div class="col-6 text-success">
-                                    <field name="synced_today"/> synced today
-                                </div>
-                                <div class="col-6 text-end text-muted">
-                                    <t t-if="record.last_pull.raw_value">Pulled <field name="last_pull" widget="relative"/></t>
+                            <div class="col-4">
+                                <div class="border rounded p-2 bg-light">
+                                    <div class="text-danger small">Failed</div>
+                                    <div class="fw-bold fs-5 text-danger"><field name="queue_failed"/></div>
                                 </div>
                             </div>
-                            <div class="row mt-2">
-                                <div class="col-12">
-                                    <button class="btn btn-sm btn-primary" name="action_sync_now" type="object"
-                                            invisible="connection_mode != 'direct'">Sync Now</button>
+                            <div class="col-4">
+                                <div class="border rounded p-2 bg-light">
+                                    <div class="text-warning small">Orphans</div>
+                                    <div class="fw-bold fs-5 text-warning"><field name="orphan_count"/></div>
                                 </div>
                             </div>
                         </div>
+                        <footer class="d-flex align-items-center justify-content-between mt-2 pt-2 border-top">
+                            <div class="small text-muted">
+                                <field name="synced_today"/> synced today
+                            </div>
+                            <div class="d-flex gap-1">
+                                <button name="action_sync_now" type="object" string="Sync Now"
+                                        class="btn btn-sm btn-primary"
+                                        invisible="connection_mode != 'direct'"/>
+                            </div>
+                        </footer>
                     </t>
                 </templates>
             </kanban>
