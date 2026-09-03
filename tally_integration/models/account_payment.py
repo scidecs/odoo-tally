@@ -34,7 +34,7 @@ class AccountPayment(models.Model):
             from ..services import tally_xml_builder
             party_name = self.partner_id.name or "Cash"
             journal = self.journal_id
-            bank_or_cash = journal.name or ("Bank" if journal.type == "bank" else "Cash")
+            bank_or_cash = (journal.default_account_id.name if journal.default_account_id else None) or journal.name or ("Bank" if journal.type == "bank" else "Cash")
             # account.payment has no 'ref' field in recent Odoo; use memo/name safely.
             pay_ref = getattr(self, "memo", False) or self.name or str(self.id)
             alloc_type = "Agst Ref" if pay_ref else "On Account"

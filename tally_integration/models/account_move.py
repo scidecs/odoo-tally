@@ -32,7 +32,7 @@ class AccountMove(models.Model):
         self.ensure_one()
         try:
             entity = _ENTITY_MAP.get(self.move_type)
-            if not entity:
+            if not entity or getattr(self, "origin_payment_id", False) or getattr(self, "payment_ids", False):
                 return
             instance = self.env["tally.instance"].search(
                 [("company_id", "=", self.company_id.id), ("active", "=", True)], limit=1)
@@ -51,35 +51,45 @@ class AccountMove(models.Model):
             ledger_entries = []
             inventory_entries = []
 
-            # Party line (Receivable / Payable)
-            is_debit_party = entity in ("sales", "debit_note")
-            party_amt = -self.amount_total if is_debit_party else self.amount_total
-            ledger_entries.append({
-                "ledger": party_name,
-                "amount": party_amt,
-                "bill_allocations": [{
-                    "type": "New Ref",
-                    "name": self.name or self.ref or str(self.id),
+            if self.move_type == "entry":
+                # General Journal Entry (multi-line double-entry)
+                for line in self.line_ids:
+                    acc_name = line.account_id.name or (line.partner_id.name if line.partner_id else "Suspense")
+                    amt = -line.debit if line.debit else line.credit
+                    ledger_entries.append({
+                        "ledger": acc_name,
+                        "amount": amt,
+                    })
+            else:
+                # Party line (Receivable / Payable)
+                is_debit_party = entity in ("sales", "debit_note")
+                party_amt = -self.amount_total if is_debit_party else self.amount_total
+                ledger_entries.append({
+                    "ledger": party_name,
                     "amount": party_amt,
-                }],
-            })
-
-            default_acc = "Sales Account" if is_debit_party else "Purchase Account"
-            for line in self.invoice_line_ids:
-                acc_name = (line.account_id.name if line.account_id else None) or default_acc
-                line_amt = line.price_subtotal if is_debit_party else -line.price_subtotal
-                ledger_entries.append({
-                    "ledger": acc_name,
-                    "amount": line_amt,
+                    "bill_allocations": [{
+                        "type": "New Ref",
+                        "name": self.name or self.ref or str(self.id),
+                        "amount": party_amt,
+                    }],
                 })
 
-            for tax_line in self.line_ids.filtered(lambda l: l.tax_line_id):
-                tax_acc = tax_line.name or (tax_line.account_id.name if tax_line.account_id else "Duties & Taxes")
-                tax_amt = tax_line.balance if is_debit_party else -tax_line.balance
-                ledger_entries.append({
-                    "ledger": tax_acc,
-                    "amount": tax_amt,
-                })
+                default_acc = "Sales Account" if is_debit_party else "Purchase Account"
+                for line in self.invoice_line_ids:
+                    acc_name = (line.account_id.name if line.account_id else None) or default_acc
+                    line_amt = line.price_subtotal if is_debit_party else -line.price_subtotal
+                    ledger_entries.append({
+                        "ledger": acc_name,
+                        "amount": line_amt,
+                    })
+
+                for tax_line in self.line_ids.filtered(lambda l: l.tax_line_id):
+                    tax_acc = tax_line.name or (tax_line.account_id.name if tax_line.account_id else "Duties & Taxes")
+                    tax_amt = tax_line.balance if is_debit_party else -tax_line.balance
+                    ledger_entries.append({
+                        "ledger": tax_acc,
+                        "amount": tax_amt,
+                    })
 
             msg_xml = tally_xml_builder.build_voucher_xml(
                 voucher_type=vch_type,
