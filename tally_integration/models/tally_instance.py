@@ -317,31 +317,71 @@ class TallyInstance(models.Model):
         return {"url": url, "auth": auth, "headers": headers, "verify": bool(self.tls_verify)}
 
     # --------------------------------------------------------------- direct mode
-    def _direct_dispatch_queue(self, limit=100):
-        """POST pending outbound (Odoo -> Tally) queue items straight to Tally.
+    MAX_QUEUE_ATTEMPTS = 5
 
-        This is the agent-less path: Odoo itself performs the HTTP call, so no
-        separate on-prem process is required when Odoo can reach the gateway.
+    def _set_status(self, ok):
+        """Reflect live reachability on the instance for the dashboard."""
+        vals = {"state": "online" if ok else "offline"}
+        if ok:
+            vals["agent_last_seen"] = fields.Datetime.now()
+        self.write(vals)
+
+    def _direct_dispatch_queue(self, limit=100):
+        """POST pending/failed outbound (Odoo -> Tally) queue items straight to Tally.
+
+        Agent-less path: Odoo performs the HTTP call itself. Transient failures are
+        retried automatically up to MAX_QUEUE_ATTEMPTS; connectivity errors stop the
+        run early and mark the instance offline.
         """
         self.ensure_one()
         from ..services import tally_transport
+        from ..services.tally_transport import TallyTransportError
         Queue = self.env["tally.sync.queue"]
-        items = Queue.search(
-            [("instance_id", "=", self.id), ("state", "=", "pending")],
-            order="create_date", limit=limit)
+        items = Queue.search([
+            ("instance_id", "=", self.id),
+            "|", ("state", "=", "pending"),
+            "&", ("state", "=", "failed"), ("attempts", "<", self.MAX_QUEUE_ATTEMPTS),
+        ], order="create_date", limit=limit)
+        ep = self._tally_endpoint()
+        contacted = None
         for item in items:
             try:
-                ep = self._tally_endpoint()
-                resp = tally_transport.post_xml(ep["url"], item.payload, auth=ep["auth"], extra_headers=ep["headers"], verify=ep["verify"])
+                resp = tally_transport.post_xml(
+                    ep["url"], item.payload, auth=ep["auth"],
+                    extra_headers=ep["headers"], verify=ep["verify"])
+                contacted = True
                 result = tally_transport.parse_import_response(resp)
                 if result["errors"]:
                     item.write({"state": "failed", "attempts": item.attempts + 1,
                                 "error": result.get("line_error") or (resp or "")[:2000]})
                 else:
-                    item.write({"state": "acked", "attempts": item.attempts + 1})
+                    item.write({"state": "acked", "attempts": item.attempts + 1, "error": False})
+            except TallyTransportError as e:
+                # Connectivity down — stop, leave remaining items for the next tick.
+                contacted = False
+                item.write({"state": "failed", "attempts": item.attempts + 1, "error": str(e)})
+                break
             except Exception as e:
                 item.write({"state": "failed", "attempts": item.attempts + 1, "error": str(e)})
+        if contacted is not None:
+            self._set_status(contacted)
         return True
+
+    def _direct_ping(self):
+        """Cheap liveness probe so the dashboard shows true online/offline in direct mode."""
+        self.ensure_one()
+        from ..services import tally_transport, tally_xml_builder
+        try:
+            ep = self._tally_endpoint()
+            tally_transport.post_xml(
+                ep["url"],
+                tally_xml_builder.build_collection_export("Company", company_name=self.tally_company),
+                auth=ep["auth"], extra_headers=ep["headers"], verify=ep["verify"], timeout=8)
+            self._set_status(True)
+            return True
+        except Exception:
+            self._set_status(False)
+            return False
 
     def _direct_pull(self, include_vouchers=True):
         """Pull masters (and optionally Day Book vouchers) from Tally directly — no agent.
@@ -430,6 +470,14 @@ class TallyInstance(models.Model):
         self.ensure_one()
         return self._pull_notification(self._direct_pull(include_vouchers=True))
 
+    def action_sync_now(self):
+        """Manual: push queued changes AND pull from Tally now (direct mode)."""
+        self.ensure_one()
+        self._direct_dispatch_queue()
+        pulled = self._direct_pull(include_vouchers=True)
+        self.last_pull = fields.Datetime.now()
+        return self._pull_notification(pulled)
+
     # ------------------------------------------------------------------ cron
     @api.model
     def _cron_health_check(self):
@@ -449,6 +497,10 @@ class TallyInstance(models.Model):
         now = fields.Datetime.now()
         for inst in instances:
             # Push runs every cron tick (responsive); pull is decoupled + less frequent.
+            try:
+                inst._direct_ping()
+            except Exception as e:
+                _logger.warning("Direct ping failed for instance %s: %s", inst.id, e)
             try:
                 inst._direct_dispatch_queue()
             except Exception as e:

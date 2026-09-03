@@ -32,6 +32,10 @@
                             string="Pull Masters from Tally" icon="fa-download"
                             invisible="connection_mode != 'direct'"
                             groups="tally_integration.group_tally_manager"/>
+                    <button name="action_sync_now" type="object"
+                            string="Sync Now" icon="fa-refresh" class="btn-primary"
+                            invisible="connection_mode != 'direct'"
+                            groups="tally_integration.group_tally_manager"/>
                     <button name="action_pull_now" type="object"
                             string="Pull Now (Masters + Vouchers)" icon="fa-cloud-download"
                             invisible="connection_mode != 'direct'"
