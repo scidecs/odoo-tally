@@ -47,35 +47,4 @@
         <field name="target">current</field>
         <field name="context">{'module': 'tally_integration', 'bin_size': False}</field>
     </record>
-
-    <!-- Company-form inherit -->
-    <record id="view_company_form_tally" model="ir.ui.view">
-        <field name="name">res.company.form.inherit.tally</field>
-        <field name="model">res.company</field>
-        <field name="inherit_id" ref="base.view_company_form"/>
-        <field name="arch" type="xml">
-            <xpath expr="//sheet" position="inside">
-                <notebook>
-                    <page string="Tally Integration" name="tally_integration">
-                        <group>
-                            <group string="Source of Truth">
-                                <field name="tally_default_source"/>
-                            </group>
-                            <group string="Connections">
-                                <button name="%(action_tally_instance)d" type="action"
-                                        string="Open Tally Instances" class="btn-primary"
-                                        icon="fa-exchange"
-                                        groups="tally_integration.group_tally_user"/>
-                            </group>
-                        </group>
-                        <div class="text-muted">
-                            Tally is the accounting system, so it is the source of truth by
-                            default. Override per entity on each Tally instance. The on-prem
-                            Sync Agent connects outbound-only over HTTPS.
-                        </div>
-                    </page>
-                </notebook>
-            </xpath>
-        </field>
-    </record>
 </odoo>
