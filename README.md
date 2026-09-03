@@ -249,10 +249,20 @@ Every entity can be individually enabled/disabled with independent directional c
 
 ## 5. Source of Truth, Conflict Resolution & Echo Suppression
 
-### 1. Watermarking with AlterID
-- Tally maintains an incremental integer watermark called `ALTERID` across all masters and vouchers.
-- On each poll, the agent only requests records with `ALTERID > last_alterid`.
-- Successful processing updates `last_alterid` on `tally.entity.config`, ensuring high performance even on datasets with 100,000+ vouchers.
+### 1. Watermarking & 3-Tier AlterID Delta Optimization
+Tally maintains an incremental integer watermark called `ALTERID` across all masters and vouchers. The integration implements a high-performance 3-layer delta strategy:
+
+1. **Decoupled Push & Pull Cadence**:
+   - **Outbound Push (Odoo → Tally)**: Runs on every cron execution (default every 2 minutes) for instant responsiveness.
+   - **Inbound Pull (Tally → Odoo)**: Decoupled to a configurable interval (`pull_interval`, default 15 minutes), preventing unnecessary network and database load.
+2. **Client-Side AlterID Fast Skip (Always Active)**:
+   - Because Tally's `ALTERID` is strictly monotonic, `process_inbound_batch` instantly skips any record where `AlterID <= entity_config.last_alterid` before performing any database or ORM operations.
+   - Even if an entire master collection is pulled, unchanged records cost zero CPU/write cycles.
+3. **Server-Side TDL Delta Filter (Opt-In)**:
+   - For high-volume companies (100,000+ masters), enabling **`Server-side AlterID Delta (TDL)`** embeds an inline collection filter (`$AlterID > last_alterid`) directly into the Tally XML export query, transferring only altered objects over the network.
+4. **Voucher Lookback Window & Auto-Post**:
+   - Vouchers pull across a configurable lookback window (`pull_lookback_days`, default 30 days or `history_from`).
+   - Optional **Auto-post (`auto_post`)** flag allows imported draft vouchers to automatically post into Odoo's general ledger.
 
 ### 2. SHA-256 Echo & Loop Suppression (Two-Way Closed Loop)
 When Odoo pushes a record to Tally or when an accountant posts an imported draft voucher in Odoo:

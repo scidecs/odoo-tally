@@ -32,6 +32,10 @@
                             string="Pull Masters from Tally" icon="fa-download"
                             invisible="connection_mode != 'direct'"
                             groups="tally_integration.group_tally_manager"/>
+                    <button name="action_pull_now" type="object"
+                            string="Pull Now (Masters + Vouchers)" icon="fa-cloud-download"
+                            invisible="connection_mode != 'direct'"
+                            groups="tally_integration.group_tally_manager"/>
                     <button name="action_open_onboarding" type="object"
                             string="Start Onboarding" icon="fa-rocket"
                             groups="tally_integration.group_tally_manager"/>
@@ -81,6 +85,12 @@
                             <field name="tally_inventory"/>
                             <field name="default_source"/>
                             <field name="poll_interval"/>
+                            <field name="auto_post"/>
+                            <field name="direct_auto_pull" invisible="connection_mode != 'direct'"/>
+                            <field name="pull_lookback_days" invisible="connection_mode != 'direct'"/>
+                            <field name="pull_interval" invisible="connection_mode != 'direct'"/>
+                            <field name="last_pull" invisible="connection_mode != 'direct'"/>
+                            <field name="use_tdl_delta" invisible="connection_mode != 'direct'"/>
                             <field name="queue_pending"/>
                             <field name="active" invisible="1"/>
                         </group>

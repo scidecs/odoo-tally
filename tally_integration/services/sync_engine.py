@@ -27,6 +27,26 @@ except ImportError:
 _logger = logging.getLogger(__name__)
 
 
+def voucher_type_to_entity(vch_type):
+    """Map a Tally voucher type name to our entity code."""
+    t = (vch_type or "").lower()
+    if "credit note" in t:
+        return "credit_note"
+    if "debit note" in t:
+        return "debit_note"
+    if "sale" in t:
+        return "sales"
+    if "purchase" in t:
+        return "purchase"
+    if "receipt" in t:
+        return "receipt"
+    if "payment" in t:
+        return "payment"
+    if "contra" in t:
+        return "contra"
+    return "journal"
+
+
 def compute_payload_hash(data):
     """Compute SHA-256 hash of a normalized JSON-serializable structure."""
     serialized = json.dumps(data, sort_keys=True, default=str)
@@ -113,10 +133,19 @@ class SyncEngine:
             _logger.warning("No sync handler for entity: %s", entity)
             return {"processed": 0, "skipped": len(records), "error": f"Unknown entity {entity}"}
 
+        cfg_base = self.get_entity_config(entity)
+        base_alterid = cfg_base.last_alterid if cfg_base else 0
+        skipped = 0
+
         for rec in records:
             rec_alterid = int(rec.get("alterid") or 0)
             if rec_alterid > max_alterid:
                 max_alterid = rec_alterid
+            # Delta skip: Tally AlterID is globally monotonic, so anything at or
+            # below the watermark was already synced — cheap to skip before upsert.
+            if rec_alterid and base_alterid and rec_alterid <= base_alterid:
+                skipped += 1
+                continue
 
             # Echo-suppression check
             guid = rec.get("guid")
@@ -141,6 +170,7 @@ class SyncEngine:
                             content_hash=p_hash,
                             origin="tally",
                         )
+                        self._maybe_autopost(entity, odoo_record)
             except Exception as e:
                 errors += 1
                 _logger.exception("Error upserting %s: %s", entity, e)
@@ -169,6 +199,32 @@ class SyncEngine:
         )
 
         return {"processed": processed, "errors": errors, "watermark": max_alterid}
+
+    def process_vouchers(self, vouchers, alterid=None):
+        """Group a mixed list of parsed vouchers by entity and dispatch each group."""
+        groups = {}
+        for v in vouchers or []:
+            groups.setdefault(voucher_type_to_entity(v.get("voucher_type")), []).append(v)
+        results = {}
+        for entity, recs in groups.items():
+            results[entity] = self.process_inbound_batch(entity, recs, alterid=alterid)
+        return results
+
+    def _maybe_autopost(self, entity, record):
+        """Post an imported voucher when the instance opts in; leave draft on failure."""
+        if not getattr(self.instance, "auto_post", False):
+            return
+        if entity not in self.VOUCHER_ENTITIES:
+            return
+        if record._name not in ("account.move", "account.payment"):
+            return
+        if getattr(record, "state", "") != "draft":
+            return
+        try:
+            with self.env.cr.savepoint():
+                record.action_post()
+        except Exception as e:
+            _logger.info("Auto-post skipped for %s %s: %s", record._name, record.id, e)
 
     # =========================================================================
     # MASTER UPSERT HANDLERS

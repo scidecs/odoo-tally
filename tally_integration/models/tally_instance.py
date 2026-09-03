@@ -57,6 +57,30 @@ class TallyInstance(models.Model):
     auth_header_name = fields.Char(string="Auth Header Name")
     auth_header_value = fields.Char(
         string="Auth Header Value", groups="tally_integration.group_tally_manager")
+
+    # --- Import behaviour ---
+    auto_post = fields.Boolean(
+        string="Auto-post Imported Vouchers", default=True,
+        help="Post imported invoices / payments / journals automatically. Any that do not "
+             "balance are left in draft for review.")
+    direct_auto_pull = fields.Boolean(
+        string="Auto-pull on Schedule", default=True,
+        help="In direct mode, the scheduled job also pulls masters and vouchers FROM Tally, "
+             "not just pushing Odoo changes to Tally.")
+    pull_lookback_days = fields.Integer(
+        string="Voucher Pull Window (days)", default=30,
+        help="How far back to pull vouchers on each scheduled/manual pull (from History From "
+             "if set, otherwise this many days back).")
+    pull_interval = fields.Integer(
+        string="Pull Interval (min)", default=15,
+        help="How often the scheduled job pulls FROM Tally (decoupled from the faster push "
+             "cadence). A full pull is heavier than a push, so this is less frequent.")
+    last_pull = fields.Datetime(string="Last Pull", readonly=True)
+    use_tdl_delta = fields.Boolean(
+        string="Server-side AlterID Delta (TDL)", default=False,
+        help="Send an inline TDL filter so Tally returns only masters changed since the last "
+             "watermark (minimal transfer). Leave off until validated against your Tally build; "
+             "client-side delta skipping applies either way.")
     tally_company = fields.Char(
         string="Tally Company",
         help="Exact name of the company open in TallyPrime.",
@@ -204,7 +228,7 @@ class TallyInstance(models.Model):
             from ..services import tally_transport, tally_xml_builder, tally_xml_parser
             try:
                 ep = self._tally_endpoint()
-                xml = tally_xml_builder.build_export_envelope("<COLLECTION><TYPE>Company</TYPE></COLLECTION>")
+                xml = tally_xml_builder.build_collection_export("Company", company_name=self.tally_company)
                 resp = tally_transport.post_xml(ep["url"], xml, auth=ep["auth"], extra_headers=ep["headers"], verify=ep["verify"], timeout=5)
                 root = tally_xml_parser.parse_tally_xml_root(resp)
                 return {
@@ -319,13 +343,14 @@ class TallyInstance(models.Model):
                 item.write({"state": "failed", "attempts": item.attempts + 1, "error": str(e)})
         return True
 
-    def action_pull_masters(self):
-        """Best-effort direct pull of master collections from Tally (no agent).
+    def _direct_pull(self, include_vouchers=True):
+        """Pull masters (and optionally Day Book vouchers) from Tally directly — no agent.
 
-        Voucher (day-book) export by date range is still pending; masters use
-        native Tally collections and feed the same sync engine.
+        Idempotent: re-pulling updates existing records via the identity map and is
+        echo-suppressed, so a scheduled full pull is safe.
         """
         self.ensure_one()
+        from datetime import date, timedelta
         from ..services import tally_transport, tally_xml_builder, tally_xml_parser
         from ..services.sync_engine import SyncEngine
         parser_map = {
@@ -338,7 +363,10 @@ class TallyInstance(models.Model):
             "godown": tally_xml_parser.parse_godowns_from_xml,
         }
         engine = SyncEngine(self.env, self)
+        ep = self._tally_endpoint()
         pulled = 0
+
+        # --- Masters (native collections) ---
         for cfg in self.entity_config_ids.filtered(
                 lambda c: c.enabled and c.direction in ("tally_to_odoo", "both")):
             ctype = tally_xml_builder.COLLECTION_MAP.get(cfg.entity)
@@ -346,23 +374,61 @@ class TallyInstance(models.Model):
             if not ctype or not pfn:
                 continue
             try:
-                xml = tally_xml_builder.build_collection_export(ctype, company_name=self.tally_company)
-                ep = self._tally_endpoint()
-                resp = tally_transport.post_xml(ep["url"], xml, auth=ep["auth"], extra_headers=ep["headers"], verify=ep["verify"])
+                from_aid = cfg.last_alterid if self.use_tdl_delta else None
+                xml = tally_xml_builder.build_collection_export(
+                    ctype, company_name=self.tally_company, from_alterid=from_aid)
+                resp = tally_transport.post_xml(ep["url"], xml, auth=ep["auth"],
+                                                extra_headers=ep["headers"], verify=ep["verify"])
                 root = tally_xml_parser.parse_tally_xml_root(resp)
                 records = pfn(root) if root is not None else []
                 if records:
-                    engine.process_inbound_batch(cfg.entity, records)
-                    pulled += len(records)
+                    res = engine.process_inbound_batch(cfg.entity, records)
+                    pulled += (res or {}).get("processed", 0)
             except Exception as e:
                 self.env["tally.sync.log"].log(
-                    self, "tally_to_odoo", cfg.entity, "error", "Direct pull failed: %s" % e)
+                    self, "tally_to_odoo", cfg.entity, "error", "Master pull failed: %s" % e)
+
+        # --- Vouchers (Day Book, date range) ---
+        if include_vouchers and self.odoo_role != "operational":
+            voucher_codes = {"sales", "credit_note", "purchase", "debit_note",
+                             "receipt", "payment", "journal", "contra"}
+            enabled_v = self.entity_config_ids.filtered(
+                lambda c: c.enabled and c.entity in voucher_codes
+                and c.direction in ("tally_to_odoo", "both"))
+            if enabled_v:
+                to_d = date.today()
+                from_d = self.history_from or (to_d - timedelta(days=self.pull_lookback_days or 30))
+                try:
+                    xml = tally_xml_builder.build_voucher_export(from_d, to_d, company_name=self.tally_company)
+                    resp = tally_transport.post_xml(ep["url"], xml, auth=ep["auth"],
+                                                    extra_headers=ep["headers"], verify=ep["verify"])
+                    root = tally_xml_parser.parse_tally_xml_root(resp)
+                    vouchers = tally_xml_parser.parse_vouchers_from_xml(root) if root is not None else []
+                    if vouchers:
+                        res = engine.process_vouchers(vouchers)
+                        pulled += sum((r or {}).get("processed", 0) for r in res.values())
+                except Exception as e:
+                    self.env["tally.sync.log"].log(
+                        self, "tally_to_odoo", "journal", "error", "Voucher pull failed: %s" % e)
+        return pulled
+
+    def _pull_notification(self, pulled):
         return {
             "type": "ir.actions.client", "tag": "display_notification",
             "params": {"title": _("Direct pull complete"),
-                       "message": _("Pulled %s master record(s) from Tally.") % pulled,
+                       "message": _("Pulled / updated %s record(s) from Tally.") % pulled,
                        "type": "success", "sticky": False},
         }
+
+    def action_pull_masters(self):
+        """Manual: pull master data from Tally now (direct mode)."""
+        self.ensure_one()
+        return self._pull_notification(self._direct_pull(include_vouchers=False))
+
+    def action_pull_now(self):
+        """Manual: pull masters AND vouchers from Tally now (direct mode)."""
+        self.ensure_one()
+        return self._pull_notification(self._direct_pull(include_vouchers=True))
 
     # ------------------------------------------------------------------ cron
     @api.model
@@ -378,11 +444,22 @@ class TallyInstance(models.Model):
 
     @api.model
     def _cron_direct_sync(self):
-        """Drain outbound queues for all direct-mode instances (agent-less push)."""
+        """For every direct-mode instance: push queued changes AND pull from Tally."""
         instances = self.search([("active", "=", True), ("connection_mode", "=", "direct")])
+        now = fields.Datetime.now()
         for inst in instances:
+            # Push runs every cron tick (responsive); pull is decoupled + less frequent.
             try:
                 inst._direct_dispatch_queue()
             except Exception as e:
-                _logger.warning("Direct sync failed for instance %s: %s", inst.id, e)
+                _logger.warning("Direct push failed for instance %s: %s", inst.id, e)
+            if inst.direct_auto_pull:
+                due = (not inst.last_pull) or (
+                    (now - inst.last_pull).total_seconds() >= (inst.pull_interval or 15) * 60)
+                if due:
+                    try:
+                        inst._direct_pull(include_vouchers=True)
+                        inst.last_pull = now
+                    except Exception as e:
+                        _logger.warning("Direct pull failed for instance %s: %s", inst.id, e)
         return True

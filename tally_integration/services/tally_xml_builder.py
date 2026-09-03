@@ -398,21 +398,65 @@ COLLECTION_MAP = {
 }
 
 
-def build_collection_export(collection_type, company_name=None):
-    """Build a Tally 'Export Collection' request for a native object type."""
+def build_collection_export(collection_type, company_name=None, from_alterid=None):
+    """Build a Tally 'Export Collection' request for a native object type.
+
+    When ``from_alterid`` is a positive int, an inline TDL defines a filtered
+    collection returning only objects with ``$AlterID > from_alterid`` — a
+    server-side delta so unchanged masters never cross the wire. Falls back to a
+    full collection export when ``from_alterid`` is falsy.
+    """
     company_tag = (f"<SVCURRENTCOMPANY>{xml_escape(company_name)}</SVCURRENTCOMPANY>"
                    if company_name else "")
+    tdl = ""
+    coll_id = collection_type
+    if from_alterid and int(from_alterid) > 0:
+        coll_id = "Oti%sColl" % collection_type
+        filt = "OtiAlt%s" % collection_type
+        tdl = f"""
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="{coll_id}" ISMODIFY="No" ISFIXED="No" ISINITIALIZE="No" ISOPTION="No" ISINTERNAL="No">
+            <TYPE>{xml_escape(collection_type)}</TYPE>
+            <FILTER>{filt}</FILTER>
+          </COLLECTION>
+          <SYSTEM TYPE="Formulae" NAME="{filt}">$AlterID &gt; {int(from_alterid)}</SYSTEM>
+        </TDLMESSAGE>
+      </TDL>"""
     return f"""<ENVELOPE>
   <HEADER>
     <TALLYREQUEST>Export</TALLYREQUEST>
     <TYPE>Collection</TYPE>
-    <ID>{xml_escape(collection_type)}</ID>
+    <ID>{xml_escape(coll_id)}</ID>
   </HEADER>
   <BODY>
     <DESC>
       <STATICVARIABLES>
         <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
         {company_tag}
+      </STATICVARIABLES>{tdl}
+    </DESC>
+  </BODY>
+</ENVELOPE>"""
+
+
+def build_voucher_export(from_date, to_date, company_name=None):
+    """Export vouchers (Day Book) for a date range as XML, for Tally -> Odoo pull."""
+    company_tag = (f"<SVCURRENTCOMPANY>{xml_escape(company_name)}</SVCURRENTCOMPANY>"
+                   if company_name else "")
+    return f"""<ENVELOPE>
+  <HEADER>
+    <TALLYREQUEST>Export</TALLYREQUEST>
+    <TYPE>Data</TYPE>
+    <ID>Day Book</ID>
+  </HEADER>
+  <BODY>
+    <DESC>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+        {company_tag}
+        <SVFROMDATE>{format_tally_date(from_date)}</SVFROMDATE>
+        <SVTODATE>{format_tally_date(to_date)}</SVTODATE>
       </STATICVARIABLES>
     </DESC>
   </BODY>
