@@ -601,23 +601,36 @@ class TallyInstance(models.Model):
                         if mid:
                             live_ids.add(mid)
 
+                # Safety: an empty result means the export failed or returned nothing.
+                # Never flag orphans on an empty manifest (would delete-flag the whole book).
+                if not live_ids:
+                    self.env["tally.sync.log"].log(
+                        self, "tally_to_odoo", ent, "warning",
+                        _("Deletion reconcile skipped for %s: Tally returned no records (export failed?).") % ent)
+                    continue
+
                 # Find all active mappings for this entity
+                # Only reconcile records that originated in Tally: they carry a real GUID.
+                # Odoo-origin mappings use a synthetic "odoo_*" guid and must never be
+                # treated as "deleted in Tally".
                 mappings = self.env["tally.mapping"].search([
                     ("instance_id", "=", self.id),
                     ("entity", "=", ent),
                     ("state", "!=", "orphan"),
+                    ("last_origin", "=", "tally"),
                 ])
 
                 orphaned_mappings = []
                 for m in mappings:
                     guid = (m.tally_guid or "").lower()
                     mid = str(m.tally_masterid or "")
-                    # Check if mapped identifier exists in Tally
-                    if guid and guid not in live_ids and mid not in live_ids:
+                    if not guid or guid.startswith("odoo_"):
+                        continue  # synthetic id — cannot judge deletion
+                    if guid not in live_ids and mid not in live_ids:
                         orphaned_mappings.append(m)
 
                 if orphaned_mappings:
-                    orphaned_records = self.env["tally.mapping"].concat(*orphaned_mappings)
+                    orphaned_records = self.env["tally.mapping"].browse([m.id for m in orphaned_mappings])
                     orphaned_records.write({
                         "is_orphan": True,
                         "state": "orphan",
