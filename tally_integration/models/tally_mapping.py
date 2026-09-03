@@ -26,8 +26,12 @@ class TallyMapping(models.Model):
         [("tally", "Tally"), ("odoo", "Odoo")], string="Last Change Origin")
     last_sync = fields.Datetime()
     state = fields.Selection(
-        [("active", "Active"), ("conflict", "Conflict"), ("error", "Error")],
+        [("active", "Active"), ("conflict", "Conflict"), ("error", "Error"), ("orphan", "Orphan (Deleted in Tally)")],
         default="active", index=True)
+    is_orphan = fields.Boolean(
+        string="Deleted in Tally", default=False, index=True,
+        help="Flagged when this record is no longer found in Tally during reconciliation.")
+    orphan_date = fields.Datetime(string="Marked Orphan Date")
 
     _guid_uniq = models.Constraint(
         "UNIQUE(instance_id, entity, tally_guid)",
@@ -85,3 +89,8 @@ class TallyMapping(models.Model):
             "view_mode": "form",
             "target": "current",
         }
+
+    def action_restore_active(self):
+        """Manually un-orphan or resolve conflict for this mapping."""
+        self.write({"state": "active", "is_orphan": False, "orphan_date": False})
+        return True

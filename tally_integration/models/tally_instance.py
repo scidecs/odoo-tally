@@ -326,15 +326,16 @@ class TallyInstance(models.Model):
             vals["agent_last_seen"] = fields.Datetime.now()
         self.write(vals)
 
-    def _direct_dispatch_queue(self, limit=100):
+    def _direct_dispatch_queue(self, limit=100, batch_size=25):
         """POST pending/failed outbound (Odoo -> Tally) queue items straight to Tally.
 
-        Agent-less path: Odoo performs the HTTP call itself. Transient failures are
-        retried automatically up to MAX_QUEUE_ATTEMPTS; connectivity errors stop the
-        run early and mark the instance offline.
+        High throughput batching: Bundles up to `batch_size` TALLYMESSAGE items inside
+        a single XML envelope. If the batch succeeds, all items are acknowledged together.
+        If a batch fails, it falls back to item-by-item dispatch to isolate individual errors.
         """
         self.ensure_one()
-        from ..services import tally_transport
+        import re
+        from ..services import tally_transport, tally_xml_builder
         from ..services.tally_transport import TallyTransportError
         Queue = self.env["tally.sync.queue"]
         items = Queue.search([
@@ -342,9 +343,21 @@ class TallyInstance(models.Model):
             "|", ("state", "=", "pending"),
             "&", ("state", "=", "failed"), ("attempts", "<", self.MAX_QUEUE_ATTEMPTS),
         ], order="create_date", limit=limit)
+        if not items:
+            return True
+
         ep = self._tally_endpoint()
         contacted = None
-        for item in items:
+
+        def _extract_messages(xml_text):
+            return re.findall(r"(<TALLYMESSAGE[\s\S]*?</TALLYMESSAGE>)", xml_text or "")
+
+        def _detect_report_type(xml_text):
+            m = re.search(r"<ID>(.*?)</ID>", xml_text or "")
+            return m.group(1) if m else "All Masters"
+
+        def _dispatch_single_item(item):
+            nonlocal contacted
             try:
                 resp = tally_transport.post_xml(
                     ep["url"], item.payload, auth=ep["auth"],
@@ -357,12 +370,70 @@ class TallyInstance(models.Model):
                 else:
                     item.write({"state": "acked", "attempts": item.attempts + 1, "error": False})
             except TallyTransportError as e:
-                # Connectivity down — stop, leave remaining items for the next tick.
                 contacted = False
                 item.write({"state": "failed", "attempts": item.attempts + 1, "error": str(e)})
-                break
+                raise
             except Exception as e:
                 item.write({"state": "failed", "attempts": item.attempts + 1, "error": str(e)})
+
+        # Group items by report_type for batch packaging
+        by_report_type = {}
+        for item in items:
+            rtype = _detect_report_type(item.payload)
+            by_report_type.setdefault(rtype, []).append(item)
+
+        for rtype, ritems in by_report_type.items():
+            # Chunk items into batches
+            for i in range(0, len(ritems), batch_size):
+                batch = ritems[i:i + batch_size]
+                if len(batch) == 1:
+                    try:
+                        _dispatch_single_item(batch[0])
+                    except TallyTransportError:
+                        break
+                    continue
+
+                # Batch dispatch (multi-message envelope)
+                try:
+                    all_messages = []
+                    for item in batch:
+                        all_messages.extend(_extract_messages(item.payload))
+
+                    if not all_messages:
+                        for it in batch:
+                            _dispatch_single_item(it)
+                        continue
+
+                    batched_xml = tally_xml_builder.wrap_import_envelope(
+                        all_messages, company_name=self.tally_company, report_type=rtype)
+
+                    resp = tally_transport.post_xml(
+                        ep["url"], batched_xml, auth=ep["auth"],
+                        extra_headers=ep["headers"], verify=ep["verify"])
+                    contacted = True
+                    result = tally_transport.parse_import_response(resp)
+
+                    if result["errors"] == 0 and (result["created"] > 0 or result["altered"] > 0):
+                        # Whole batch succeeded!
+                        for it in batch:
+                            it.write({"state": "acked", "attempts": it.attempts + 1, "error": False})
+                    else:
+                        # Fallback to single item dispatch to isolate which one had errors
+                        for it in batch:
+                            _dispatch_single_item(it)
+                except TallyTransportError as e:
+                    contacted = False
+                    for it in batch:
+                        it.write({"state": "failed", "attempts": it.attempts + 1, "error": str(e)})
+                    break
+                except Exception as e:
+                    # Fallback on unexpected error
+                    for it in batch:
+                        try:
+                            _dispatch_single_item(it)
+                        except Exception:
+                            pass
+
         if contacted is not None:
             self._set_status(contacted)
         return True
@@ -478,6 +549,111 @@ class TallyInstance(models.Model):
         self.last_pull = fields.Datetime.now()
         return self._pull_notification(pulled)
 
+    def _reconcile_tally_deletions(self, entities=None):
+        """Reconciliation: Identify and flag records deleted directly in Tally.
+
+        Tally's AlterID tracks additions and edits, but never reports deletions.
+        This method queries Tally's live collection manifests for mapped masters,
+        identifies mappings missing from Tally, and marks them as `is_orphan = True`
+        and `state = 'orphan'` without deleting any financial records in Odoo.
+        """
+        self.ensure_one()
+        import xml.etree.ElementTree as ET
+        from ..services import tally_transport, tally_xml_builder, tally_xml_parser
+
+        if not entities:
+            entities = ["ledger", "group", "stock_item", "uom", "cost_centre"]
+
+        type_collection_map = {
+            "ledger": ("Ledger", "NAME,GUID,MASTERID"),
+            "group": ("Group", "NAME,GUID,MASTERID"),
+            "stock_item": ("StockItem", "NAME,GUID,MASTERID"),
+            "uom": ("Unit", "NAME,GUID,MASTERID,ORIGINALNAME"),
+            "cost_centre": ("CostCentre", "NAME,GUID,MASTERID"),
+        }
+
+        ep = self._tally_endpoint()
+        orphan_summary = {}
+
+        for ent in entities:
+            if ent not in type_collection_map:
+                continue
+            col_type, fetch_fields = type_collection_map[ent]
+            try:
+                col_xml = tally_xml_builder.build_collection_export(
+                    col_type, company_name=self.tally_company, fetch_fields=fetch_fields)
+                resp = tally_transport.post_xml(
+                    ep["url"], col_xml, auth=ep["auth"],
+                    extra_headers=ep["headers"], verify=ep["verify"])
+                root = tally_xml_parser.parse_tally_xml_root(resp)
+
+                # Collect all live identifiers and GUIDs from Tally
+                live_ids = set()
+                for el in root.iter():
+                    if el.tag in ("LEDGER", "GROUP", "STOCKITEM", "UNIT", "COSTCENTRE"):
+                        name = el.get("NAME") or (el.findtext("NAME") or "").strip()
+                        guid = (el.findtext("GUID") or "").strip()
+                        mid = (el.findtext("MASTERID") or "").strip()
+                        if name:
+                            live_ids.add(name.lower())
+                        if guid:
+                            live_ids.add(guid.lower())
+                        if mid:
+                            live_ids.add(mid)
+
+                # Find all active mappings for this entity
+                mappings = self.env["tally.mapping"].search([
+                    ("instance_id", "=", self.id),
+                    ("entity", "=", ent),
+                    ("state", "!=", "orphan"),
+                ])
+
+                orphaned_mappings = []
+                for m in mappings:
+                    guid = (m.tally_guid or "").lower()
+                    mid = str(m.tally_masterid or "")
+                    # Check if mapped identifier exists in Tally
+                    if guid and guid not in live_ids and mid not in live_ids:
+                        orphaned_mappings.append(m)
+
+                if orphaned_mappings:
+                    orphaned_records = self.env["tally.mapping"].concat(*orphaned_mappings)
+                    orphaned_records.write({
+                        "is_orphan": True,
+                        "state": "orphan",
+                        "orphan_date": fields.Datetime.now(),
+                    })
+                    orphan_summary[ent] = len(orphaned_mappings)
+                    self.env["tally.sync.log"].log(
+                        self, "tally_to_odoo", ent, "warning",
+                        _("Deletion Reconcile: Found %s orphaned record(s) deleted in Tally.") % len(orphaned_mappings)
+                    )
+            except Exception as e:
+                _logger.warning("Deletion reconcile failed for entity %s on instance %s: %s", ent, self.id, e)
+
+        return orphan_summary
+
+    def action_reconcile_deletions(self):
+        """Manual trigger for Deletion Reconciliation."""
+        self.ensure_one()
+        summary = self._reconcile_tally_deletions()
+        total_orphans = sum(summary.values())
+        if total_orphans > 0:
+            return {
+                "name": _("Orphaned Records (Deleted in Tally)"),
+                "type": "ir.actions.act_window",
+                "res_model": "tally.mapping",
+                "view_mode": "list,form",
+                "domain": [("instance_id", "=", self.id), ("is_orphan", "=", True)],
+            }
+        else:
+            return {
+                "type": "ir.actions.client", "tag": "display_notification",
+                "params": {"title": _("Reconciliation Complete"),
+                           "message": _("All mappings are consistent with Tally. Zero orphan records found."),
+                           "type": "success", "sticky": False},
+            }
+
     # ------------------------------------------------------------------ cron
     @api.model
     def _cron_health_check(self):
@@ -514,4 +690,15 @@ class TallyInstance(models.Model):
                         inst.last_pull = now
                     except Exception as e:
                         _logger.warning("Direct pull failed for instance %s: %s", inst.id, e)
+        return True
+
+    @api.model
+    def _cron_reconcile_deletions(self):
+        """Daily cron to reconcile and audit deletions across all direct Tally instances."""
+        instances = self.search([("active", "=", True), ("connection_mode", "=", "direct")])
+        for inst in instances:
+            try:
+                inst._reconcile_tally_deletions()
+            except Exception as e:
+                _logger.warning("Scheduled deletion reconcile failed for instance %s: %s", inst.id, e)
         return True

@@ -12,10 +12,12 @@
                 <field name="odoo_res_id"/>
                 <field name="last_origin"/>
                 <field name="last_sync"/>
+                <field name="is_orphan"/>
                 <field name="state" widget="badge"
                        decoration-success="state == 'active'"
                        decoration-warning="state == 'conflict'"
-                       decoration-danger="state == 'error'"/>
+                       decoration-danger="state == 'error'"
+                       decoration-muted="state == 'orphan'"/>
             </list>
         </field>
     </record>
@@ -28,6 +30,9 @@
                 <header>
                     <button name="action_open_odoo_record" type="object"
                             string="Open Odoo Record" icon="fa-external-link"/>
+                    <button name="action_restore_active" type="object"
+                            string="Restore Active State" icon="fa-check"
+                            invisible="state == 'active'"/>
                 </header>
                 <sheet>
                     <group>
@@ -36,6 +41,8 @@
                             <field name="entity"/>
                             <field name="tally_guid"/>
                             <field name="tally_masterid"/>
+                            <field name="is_orphan"/>
+                            <field name="orphan_date" invisible="not is_orphan"/>
                         </group>
                         <group string="Odoo">
                             <field name="odoo_model_name"/>
@@ -59,6 +66,7 @@
                 <field name="tally_guid"/>
                 <field name="odoo_model_name"/>
                 <field name="instance_id"/>
+                <filter string="Orphan Records (Deleted in Tally)" name="orphans" domain="[('is_orphan', '=', True)]"/>
                 <filter string="Conflicts" name="conflicts" domain="[('state', '=', 'conflict')]"/>
                 <filter string="Errors" name="errors" domain="[('state', '=', 'error')]"/>
                 <group>

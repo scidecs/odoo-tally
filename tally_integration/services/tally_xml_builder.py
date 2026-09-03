@@ -404,7 +404,7 @@ COLLECTION_MAP = {
 }
 
 
-def build_collection_export(collection_type, company_name=None, from_alterid=None):
+def build_collection_export(collection_type, company_name=None, from_alterid=None, fetch_fields=None):
     """Build a Tally 'Export Collection' request for a native object type.
 
     When ``from_alterid`` is a positive int, an inline TDL defines a filtered
@@ -427,6 +427,17 @@ def build_collection_export(collection_type, company_name=None, from_alterid=Non
             <FILTER>{filt}</FILTER>
           </COLLECTION>
           <SYSTEM TYPE="Formulae" NAME="{filt}">$AlterID &gt; {int(from_alterid)}</SYSTEM>
+        </TDLMESSAGE>
+      </TDL>"""
+    elif fetch_fields:
+        coll_id = "Oti%sFetchColl" % collection_type
+        tdl = f"""
+      <TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="{coll_id}" ISMODIFY="No" ISFIXED="No" ISINITIALIZE="No" ISOPTION="No" ISINTERNAL="No">
+            <TYPE>{xml_escape(collection_type)}</TYPE>
+            <FETCH>{xml_escape(fetch_fields)}</FETCH>
+          </COLLECTION>
         </TDLMESSAGE>
       </TDL>"""
     return f"""<ENVELOPE>

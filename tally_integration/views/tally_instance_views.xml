@@ -40,6 +40,10 @@
                             string="Pull Now (Masters + Vouchers)" icon="fa-cloud-download"
                             invisible="connection_mode != 'direct'"
                             groups="tally_integration.group_tally_manager"/>
+                    <button name="action_reconcile_deletions" type="object"
+                            string="Reconcile Deletions" icon="fa-balance-scale"
+                            invisible="connection_mode != 'direct'"
+                            groups="tally_integration.group_tally_manager"/>
                     <button name="action_open_onboarding" type="object"
                             string="Start Onboarding" icon="fa-rocket"
                             groups="tally_integration.group_tally_manager"/>
