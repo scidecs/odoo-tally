@@ -112,6 +112,8 @@
                             <field name="odoo_role"/>
                             <field name="connection_mode"/>
                             <field name="tally_inventory"/>
+                            <field name="sync_automated_valuation_stock"
+                                   invisible="tally_inventory != 'with_inventory'"/>
                             <field name="default_source"/>
                             <field name="poll_interval"/>
                             <field name="auto_post"/>

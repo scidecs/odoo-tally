@@ -84,6 +84,9 @@ def parse_import_response(text):
     return {
         "created": _int("CREATED"),
         "altered": _int("ALTERED"),
+        "deleted": _int("DELETED"),
+        "combined": _int("COMBINED"),
+        "ignored": _int("IGNORED"),
         "errors": errors,
         "line_error": line_error,
     }

@@ -4,7 +4,12 @@
 [![License: LGPL-3](https://img.shields.io/badge/License-LGPL--3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 [![Vendor](https://img.shields.io/badge/Vendor-Scidecs-green.svg)](https://www.scidecs.com)
 
-A native Odoo 19 App-Store-grade module for near-real-time, two-way synchronization between **TallyPrime** and **Odoo 19** (Enterprise / Community / Odoo.sh / On-Premise).
+A production-targeted Odoo 19 module for near-real-time synchronization between **TallyPrime** and **Odoo 19** (Enterprise / Community / Odoo.sh / On-Premise).
+
+Scope is deliberately limited to accounting masters, inventory masters/quantities, opening
+balances, invoices, notes, payments, journals, contras, and stock transfers. It does not claim
+to implement Odoo MRP, assets, landed costs, statutory IRN generation, E-Way Bill submission,
+or GSTR filing; those require their respective Odoo applications and compliance services.
 
 Developed and maintained by **[Scidecs](https://www.scidecs.com)**.
 
@@ -30,6 +35,9 @@ Developed and maintained by **[Scidecs](https://www.scidecs.com)**.
 ---
 
 ## 1. Architecture Overview
+
+Direct mode is the default when Odoo can securely reach Tally. The agent topology below is the
+fallback for a private LAN; it now uses leased queue work so an interrupted agent cannot strand it.
 
 ```
 +-------------------------------------------------------------------+
@@ -140,33 +148,20 @@ The standalone Python agent runs on the local Windows PC or server where Tally i
 git clone https://github.com/scidecs/odoo-tally.git
 cd odoo-tally/agent
 
-# Install dependencies (Python 3.8+)
-pip install requests
+# Python 3.10+; the agent uses only the standard library
 ```
 
-#### 2. Configure Credentials:
-Create `agent.conf` or set environment variables:
-```ini
-[odoo]
-url = https://your-odoo-instance.com
-token = <PASTE_GENERATED_AGENT_TOKEN_HERE>
-
-[tally]
-host = 127.0.0.1
-port = 9000
-company = Acme Enterprises Pvt Ltd
-
-[sync]
-poll_interval = 60
-batch_size = 100
-```
-
-#### 3. Start Agent:
+#### 2. Start Agent:
 ```bash
-python tally_agent.py
+python tally_agent.py --odoo-url https://your-odoo-instance.com \
+  --token '<PASTE_GENERATED_AGENT_TOKEN_HERE>' \
+  --tally-host 127.0.0.1 --tally-port 9000 --interval 60
 ```
 
-#### 4. Run as a Windows Service (Production):
+The same values can be provided through `ODOO_URL`, `AGENT_TOKEN`, `TALLY_HOST`,
+`TALLY_PORT`, and `POLL_INTERVAL` environment variables.
+
+#### 3. Run as a Windows Service (Production):
 To ensure 24/7 continuous synchronization on Windows, use [NSSM (Non-Sucking Service Manager)](https://nssm.cc/):
 ```powershell
 nssm install OdooTallyAgent "C:\Python311\python.exe" "C:\OdooTally\agent\tally_agent.py"
@@ -264,16 +259,16 @@ Tally maintains an incremental integer watermark called `ALTERID` across all mas
    - Vouchers pull across a configurable lookback window (`pull_lookback_days`, default 30 days or `history_from`).
    - Optional **Auto-post (`auto_post`)** flag allows imported draft vouchers to automatically post into Odoo's general ledger.
 
-### 2. SHA-256 Echo & Loop Suppression (Two-Way Closed Loop)
+### 2. GUID-based Echo & Loop Suppression
 When Odoo pushes a record to Tally or when an accountant posts an imported draft voucher in Odoo:
-1. **Outbound Registration**: When any record is enqueued from Odoo, `tally.mapping.register_outbound()` records `last_origin="odoo"` along with the SHA-256 hash of the payload.
-2. **Inbound Echo Drop**: When Tally returns the record on the next `ALTERID` poll, the Sync Engine verifies `last_origin == "odoo"` and matching content hash, dropping the echo immediately.
-3. **Manual Post-Back Guard**: Inbound invoices and vouchers from Tally enter Odoo as `draft`. When a user reviews and clicks **"Post"** in Odoo, `register_outbound()` checks if `last_origin == "tally"` and suppresses the outbound enqueue so Tally never receives a duplicate voucher.
+1. **Stable identity**: Odoo sends a deterministic RFC-4122 GUID and registers it in `tally.mapping` before queueing the XML.
+2. **Inbound acknowledgement**: the first Tally read-back with that GUID is consumed as acknowledgement instead of being imported as a new record.
+3. **Manual post guard**: posting a Tally-origin draft does not enqueue it back to Tally. Master edits are allowed only when the entity policy permits Odoo-origin changes.
 
 ### 3. GST Tax Resolution & Invoice Matching
 - **Automated Tax Ledger Matching**: In Tally, Indian vouchers store GST as ledger entries (`CGST 9%`, `SGST 9%`, `IGST 18%`, `Output CGST`, `Duties & Taxes`).
 - **Odoo `account.tax` Mapping**: The engine parses tax rates/names, finds or creates the matching `account.tax` in Odoo, and attaches `tax_ids` directly to the invoice product lines.
-- **Supplementary Charges**: Non-tax adjustment ledgers (`Freight Charges`, `Discounts`, `Round Off`) are automatically appended as individual line items, guaranteeing 100% tax and invoice total fidelity with Tally.
+- **Supplementary Charges**: Explicit adjustment ledgers (`Freight Charges`, `Discounts`, `Round Off`) are appended as separate lines. Tally's party ledger total is reconciled to a visible adjustment line when a custom allocation cannot be represented by standard Odoo taxes.
 
 ### 4. Double-Entry Journal & Contra Balancing
 - Tally journals and contras are automatically validated for double-entry balance ($\Sigma \text{Debit} = \Sigma \text{Credit}$).
@@ -288,7 +283,8 @@ To eliminate duplicate records from name variations or shared companies, master 
 ### 6. Conflict Resolution
 - If an entity has direction `both` and changes occur simultaneously in both systems:
   - If **Source of Truth** is `Tally`, the Tally version overwrites Odoo.
-  - If **Source of Truth** is `Odoo`, the Odoo version overwrites Tally.
+  - If **Source of Truth** is `Odoo`, mapped inbound Tally changes are observed but do not overwrite Odoo.
+  - `Bidirectional` follows serialized arrival order. The queue pushes before the scheduled pull; failed records do not advance their AlterID watermark.
 
 ---
 
@@ -304,7 +300,7 @@ To eliminate duplicate records from name variations or shared companies, master 
 - **Fix**: Navigate to **Invoicing -> Configuration -> Tally Integration -> Sync Logs**. You can group by Entity, Status (`success`, `warning`, `error`), and inspect exact XML payloads and failure tracebacks.
 
 #### Q: Does this module conflict with third-party custom modules?
-- **Fix**: No. All outbound hooks are wrapped in defensive `try...except` and guarded by `tally_no_sync` context flags. All mapping data is stored in dedicated tables without polluting standard Odoo models.
+- **Answer**: It is designed to coexist: hooks are guarded by `tally_no_sync`, errors cannot block core writes, and identity data stays in dedicated tables. Always run integration tests with modules that also override accounting post methods.
 
 ---
 

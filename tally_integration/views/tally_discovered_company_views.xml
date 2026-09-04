@@ -6,6 +6,8 @@
         <field name="arch" type="xml">
             <list string="Discovered Tally Companies">
                 <field name="name"/>
+                <field name="reporter_instance_id"/>
+                <field name="company_id" groups="base.group_multi_company"/>
                 <field name="odoo_company_id"/>
                 <field name="instance_id"/>
                 <field name="last_seen"/>

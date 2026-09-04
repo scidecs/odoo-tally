@@ -30,6 +30,8 @@ _logger = logging.getLogger(__name__)
 def voucher_type_to_entity(vch_type):
     """Map a Tally voucher type name to our entity code."""
     t = (vch_type or "").lower()
+    if "stock journal" in t or "material transfer" in t:
+        return "stock_journal"
     if "credit note" in t:
         return "credit_note"
     if "debit note" in t:
@@ -127,6 +129,8 @@ class SyncEngine:
             "payment": self._upsert_payment_receipt,
             "journal": self._upsert_journal_voucher,
             "contra": self._upsert_contra_voucher,
+            "opening_balance": self._upsert_opening_balance,
+            "stock_journal": self._upsert_stock_journal,
         }
 
         handler = handler_map.get(entity)
@@ -153,8 +157,28 @@ class SyncEngine:
             p_hash = compute_payload_hash(rec)
             mapping = self._get_mapping(entity, guid=guid) if guid else None
 
-            if mapping and mapping.content_hash == p_hash and mapping.last_origin == "odoo":
-                # Echo suppressed
+            if mapping and mapping.last_origin == "odoo":
+                # The first Tally read-back of a GUID sent by Odoo is an acknowledgement,
+                # not a new business change. Consume it once; a later AlterID can then be
+                # treated as a genuine Tally edit.
+                mapping.write({
+                    "content_hash": p_hash,
+                    "last_origin": "odoo" if cfg_base.source_of_truth == "odoo" else "tally",
+                    "tally_masterid": str(rec.get("alterid") or mapping.tally_masterid or ""),
+                    "last_sync": fields.Datetime.now(),
+                })
+                continue
+            if mapping and cfg_base.source_of_truth == "odoo":
+                # The Odoo-owned version is authoritative. Record the observed Tally
+                # revision without overwriting Odoo; the next real Odoo write remains
+                # eligible for outbound delivery.
+                mapping.write({
+                    "tally_masterid": str(rec.get("alterid") or mapping.tally_masterid or ""),
+                    "content_hash": p_hash,
+                    "last_origin": "odoo",
+                    "last_sync": fields.Datetime.now(),
+                })
+                skipped += 1
                 continue
 
             try:
@@ -182,6 +206,8 @@ class SyncEngine:
                                 tally_guid=guid, record_count=1)
             except Exception as e:
                 errors += 1
+                if mapping:
+                    mapping.state = "conflict"
                 _logger.exception("Error upserting %s: %s", entity, e)
                 try:
                     self.env["tally.sync.log"].log(
@@ -195,7 +221,9 @@ class SyncEngine:
 
         # Advance AlterID watermark
         cfg = self.get_entity_config(entity)
-        if cfg and (alterid or max_alterid):
+        # Never advance past a failed record. Re-reading successful records is safe and
+        # preferable to permanently losing a failed accounting object.
+        if cfg and errors == 0 and (alterid or max_alterid):
             target_aid = max(int(alterid or 0), max_alterid)
             if target_aid > cfg.last_alterid:
                 cfg.write({"last_alterid": target_aid, "last_sync": fields.Datetime.now()})
@@ -211,7 +239,8 @@ class SyncEngine:
                 record_count=processed,
             )
 
-        return {"processed": processed, "errors": errors, "watermark": max_alterid}
+        return {"processed": processed, "errors": errors,
+                "watermark": cfg.last_alterid if cfg else max_alterid}
 
     def process_vouchers(self, vouchers, alterid=None):
         """Group a mixed list of parsed vouchers by entity and dispatch each group."""
@@ -614,6 +643,16 @@ class SyncEngine:
         """Apply physical on-hand stock quantities to Odoo stock.quant."""
         if not product or not hasattr(product, "qty_available"):
             return
+        valuation = getattr(product.categ_id, "property_valuation", False)
+        if valuation == "real_time" and not self.instance.sync_automated_valuation_stock:
+            self.env["tally.sync.log"].log(
+                self.instance, "tally_to_odoo", "stock_item", "warning",
+                _("Quantity adjustment skipped for %s: its category uses automated valuation. "
+                  "Enable 'Adjust Automated-Valuation Stock' only when stock value is not also "
+                  "being migrated through opening balances.") % product.display_name,
+                record_name=product.display_name,
+                odoo_model_name=product._name, odoo_res_id=product.id)
+            return
 
         Quant = self.env["stock.quant"]
         Location = self.env["stock.location"]
@@ -711,9 +750,17 @@ class SyncEngine:
     def _upsert_godown(self, data):
         """Upsert stock.location from Tally <GODOWN>."""
         name = data.get("name")
-        if not name or name == "Main Location":
+        if not name:
             return False
         Location = self.env["stock.location"]
+        if name == "Main Location":
+            warehouse = self.env["stock.warehouse"].search([
+                ("company_id", "=", self.company.id),
+            ], limit=1)
+            return warehouse.lot_stock_id or Location.search([
+                ("usage", "=", "internal"),
+                ("company_id", "in", (False, self.company.id)),
+            ], limit=1)
         rec = Location.search([
             ("name", "=", name),
             ("company_id", "in", (False, self.company.id))
@@ -884,6 +931,7 @@ class SyncEngine:
 
         # 1. Detect GST / Tax ledgers from ledger_entries
         tax_ids = []
+        tax_signatures = []
         extra_charge_lines = []
         roundoff_amount = 0.0
         for le in data.get("ledger_entries", []):
@@ -898,8 +946,16 @@ class SyncEngine:
                 tax_rec = self._find_or_create_tax(led, tax_type=tax_type)
                 if tax_rec and tax_rec.id not in tax_ids:
                     tax_ids.append(tax_rec.id)
-            elif amt > 0:
-                # Supplementary charges / discounts / freight / packaging
+                    tax_signatures.append((
+                        next((k for k in ("cgst", "sgst", "igst", "tds", "tcs", "cess") if k in led_lower), "tax"),
+                        float(tax_rec.amount),
+                    ))
+            elif (amt > 0 and data.get("inventory_entries") and any(
+                    k in led_lower for k in (
+                        "freight", "shipping", "delivery", "packing", "handling",
+                        "discount", "round off", "other charge", "surcharge"))):
+                # Only explicit supplementary ledgers are additional invoice lines.
+                # The normal Sales/Purchase ledger is already represented by item lines.
                 charge_acc = self._get_or_create_account(led, default_type=default_acc_type)
                 extra_charge_lines.append((0, 0, {
                     "name": led,
@@ -911,6 +967,12 @@ class SyncEngine:
         # 2. Prepare invoice lines
         lines = []
         inv_entries = data.get("inventory_entries", [])
+        # A voucher containing more than one rate for the same tax component is a
+        # mixed-rate invoice. Global tax IDs cannot be safely applied to every line.
+        mixed_tax_rates = any(
+            len({rate for kind, rate in tax_signatures if kind == component}) > 1
+            for component in {kind for kind, _rate in tax_signatures}
+        )
         if inv_entries:
             for ie in inv_entries:
                 product = self._get_or_create_product(ie.get("item"))
@@ -922,8 +984,27 @@ class SyncEngine:
                     "price_unit": float(ie.get("rate") or abs(float(ie.get("amount") or 0.0))),
                     "discount": float(ie.get("discount") or 0.0),
                 }
-                if tax_ids:
-                    line_vals["tax_ids"] = [(6, 0, tax_ids)]
+                item_tax_ids = []
+                item_gst_rate = abs(float(ie.get("gst_rate") or 0.0))
+                if item_gst_rate:
+                    interstate = bool(partner and partner.state_id and self.company.state_id
+                                      and partner.state_id != self.company.state_id)
+                    if interstate:
+                        tax = self._find_or_create_tax(
+                            "IGST %.2f%%" % item_gst_rate, rate=item_gst_rate, tax_type=tax_type)
+                        item_tax_ids = tax.ids
+                    else:
+                        half = item_gst_rate / 2.0
+                        cgst = self._find_or_create_tax(
+                            "CGST %.2f%%" % half, rate=half, tax_type=tax_type)
+                        sgst = self._find_or_create_tax(
+                            "SGST %.2f%%" % half, rate=half, tax_type=tax_type)
+                        item_tax_ids = (cgst | sgst).ids
+                elif tax_ids and not mixed_tax_rates:
+                    item_tax_ids = tax_ids
+                # Explicitly clear product defaults when Tally supplied no tax;
+                # otherwise Odoo may silently apply the company's default sales tax.
+                line_vals["tax_ids"] = [(6, 0, item_tax_ids)]
                 lines.append((0, 0, line_vals))
         else:
             # Fallback to ledger entries if pure accounting invoice
@@ -937,7 +1018,7 @@ class SyncEngine:
                         "quantity": 1,
                         "price_unit": abs(float(le.get("amount") or 0.0)),
                     }
-                    if tax_ids:
+                    if tax_ids and not mixed_tax_rates:
                         line_vals["tax_ids"] = [(6, 0, tax_ids)]
                     lines.append((0, 0, line_vals))
 
@@ -1016,6 +1097,26 @@ class SyncEngine:
         else:
             vals["invoice_line_ids"] = lines
             move = Move.create(vals)
+
+        # Tally's party ledger is the authoritative voucher total. Preserve exact
+        # total fidelity even when a custom Tally tax/charge allocation cannot be
+        # represented by standard Odoo taxes; leave a visible reconciliation line.
+        if move and move.state == "draft":
+            party_amounts = [abs(float(le.get("amount") or 0.0))
+                             for le in data.get("ledger_entries", [])
+                             if le.get("ledger") == partner_name]
+            target_total = max(party_amounts or [0.0])
+            difference = self.company.currency_id.round(target_total - move.amount_total)
+            if target_total and difference:
+                adjustment_account = self._get_or_create_account(
+                    "Tally Voucher Reconciliation", default_type=default_acc_type)
+                self.env["account.move.line"].create({
+                    "move_id": move.id,
+                    "name": "Tally total reconciliation",
+                    "account_id": adjustment_account.id,
+                    "quantity": 1.0,
+                    "price_unit": difference,
+                })
 
         # Post-sync audit chatter notification
         if move and hasattr(move, "message_post"):
@@ -1172,63 +1273,6 @@ class SyncEngine:
 
         return rec
 
-    def _upsert_contra_voucher(self, data):
-        """Upsert Contra voucher (Cash <-> Bank or Bank <-> Bank transfer) into Odoo."""
-        Move = self.env["account.move"]
-        vch_num = data.get("voucher_number")
-        date_str = data.get("date")
-
-        ledger_entries = data.get("ledger_entries", [])
-        if len(ledger_entries) < 2:
-            return False
-
-        lines = []
-        for le in ledger_entries:
-            led = le.get("ledger", "")
-            amt = float(le.get("amount") or 0.0)
-            account = self._get_or_create_account(led, default_type="asset_cash")
-            debit = abs(amt) if amt < 0 else 0.0
-            credit = abs(amt) if amt > 0 else 0.0
-            lines.append((0, 0, {
-                "name": f"Contra: {led}",
-                "account_id": account.id if account else False,
-                "debit": debit,
-                "credit": credit,
-            }))
-
-        journal = self._get_or_create_journal("general")
-
-        vals = {
-            "move_type": "entry",
-            "date": date_str,
-            "ref": vch_num,
-            "narration": data.get("narration") or f"<p>Tally Contra Voucher {vch_num}</p>",
-            "company_id": self.company.id,
-            "journal_id": journal.id if journal else False,
-            "line_ids": lines,
-        }
-
-        rec = Move.search([
-            ("ref", "=", vch_num),
-            ("move_type", "=", "entry"),
-            ("company_id", "=", self.company.id)
-        ], limit=1)
-
-        if rec:
-            if rec.state == "draft":
-                rec.line_ids.unlink()
-                rec.write(vals)
-        else:
-            rec = Move.create(vals)
-
-        if rec and rec.state == "draft" and self.instance.auto_post:
-            try:
-                rec.action_post()
-            except Exception as e:
-                _logger.info("Contra move auto-post skipped: %s", e)
-
-        return rec
-
     def _upsert_journal_voucher(self, data):
         """Upsert account.move (entry) from Tally Journal with automatic balance check."""
         Move = self.env["account.move"]
@@ -1299,6 +1343,134 @@ class SyncEngine:
         """Upsert account.move (contra entry) between Cash and Bank."""
         return self._upsert_journal_voucher(data)
 
+    def _upsert_opening_balance(self, data):
+        """Create or update a balanced opening entry for one Tally ledger."""
+        amount = float(data.get("opening_balance") or 0.0)
+        name = data.get("name") or data.get("ledger")
+        if not name or not amount:
+            return False
+        parent = (data.get("parent") or "").lower()
+        is_customer = "debtor" in parent or "customer" in parent
+        is_supplier = "creditor" in parent or "vendor" in parent or "supplier" in parent
+        partner = False
+        if is_customer or is_supplier:
+            partner = self._get_or_create_partner(name, is_supplier=is_supplier)
+            account = (partner.property_account_payable_id if is_supplier
+                       else partner.property_account_receivable_id)
+        else:
+            account_type = self._map_tally_group_to_account_type(parent)
+            account = self._get_or_create_account(name, default_type=account_type)
+        counterpart = self._get_or_create_account(
+            "Tally Opening Balance Equity", default_type="equity_unaffected")
+        journal = self._get_or_create_journal("general")
+        identity = data.get("guid") or name
+        ref = "TALLY-OPEN-%s" % identity
+        Move = self.env["account.move"]
+        move = Move.search([
+            ("ref", "=", ref), ("company_id", "=", self.company.id),
+            ("move_type", "=", "entry"),
+        ], limit=1)
+        debit, credit = (amount, 0.0) if amount > 0 else (0.0, abs(amount))
+        lines = [
+            (0, 0, {"name": name, "account_id": account.id,
+                    "partner_id": partner.id if partner else False,
+                    "debit": debit, "credit": credit}),
+            (0, 0, {"name": "Opening balance counterpart", "account_id": counterpart.id,
+                    "debit": credit, "credit": debit}),
+        ]
+        vals = {
+            "move_type": "entry", "date": self.instance.history_from or fields.Date.context_today(self.env.user),
+            "ref": ref, "journal_id": journal.id, "company_id": self.company.id,
+            "line_ids": lines,
+        }
+        if move and move.state == "draft":
+            move.line_ids.unlink()
+            move.write(vals)
+        elif not move:
+            move = Move.create(vals)
+        if move.state == "draft" and self.instance.auto_post:
+            move.action_post()
+        return move
+
+    def _upsert_stock_journal(self, data):
+        """Import a Tally Stock Journal as an internal Odoo stock transfer."""
+        entries = data.get("inventory_entries") or []
+        outgoing = [e for e in entries if float(e.get("qty") or 0.0) < 0]
+        incoming = [e for e in entries if float(e.get("qty") or 0.0) > 0]
+        if not outgoing or not incoming:
+            raise ValueError(_("Stock Journal requires both outward and inward inventory lines."))
+        Picking = self.env["stock.picking"]
+        ref = data.get("voucher_number") or data.get("guid")
+        picking = Picking.search([
+            ("origin", "=", ref), ("company_id", "=", self.company.id),
+            ("picking_type_id.code", "=", "internal"),
+        ], limit=1)
+        picking_type = self.env["stock.picking.type"].search([
+            ("code", "=", "internal"), ("company_id", "in", (False, self.company.id)),
+        ], limit=1)
+        if not picking_type:
+            # A fresh Odoo database may have Inventory installed without a
+            # warehouse for the target company.  Creating the warehouse also
+            # creates the standard internal-transfer operation type and stock
+            # location hierarchy required by the imported Stock Journal.
+            Warehouse = self.env["stock.warehouse"]
+            warehouse = Warehouse.search([("company_id", "=", self.company.id)], limit=1)
+            if not warehouse:
+                import re
+                base_code = re.sub(r"[^A-Z0-9]", "", (self.company.name or "TLY").upper())[:3] or "TLY"
+                code = base_code
+                suffix = 1
+                while Warehouse.search_count([("code", "=", code)]):
+                    suffix += 1
+                    code = "%s%s" % (base_code[:max(1, 5 - len(str(suffix)))], suffix)
+                warehouse = Warehouse.create({
+                    "name": _("%s Warehouse") % self.company.name,
+                    "code": code,
+                    "company_id": self.company.id,
+                })
+            picking_type = warehouse.int_type_id or self.env["stock.picking.type"].search([
+                ("code", "=", "internal"), ("warehouse_id", "=", warehouse.id),
+            ], limit=1)
+        if not picking_type:
+            raise ValueError(_("Unable to configure an internal transfer operation type."))
+        move_commands = []
+        for source_line in outgoing:
+            product = self._get_or_create_product(source_line.get("item"))
+            destination_line = next(
+                (e for e in incoming if e.get("item") == source_line.get("item")), incoming[0])
+            source = self._upsert_godown({"name": source_line.get("godown") or "Main Location"})
+            destination = self._upsert_godown({"name": destination_line.get("godown") or "Main Location"})
+            move_commands.append((0, 0, {
+                # Odoo 19 replaced stock.move.name with the picking
+                # description field.
+                "description_picking": source_line.get("item") or ref,
+                "product_id": product.id,
+                "product_uom_qty": abs(float(source_line.get("qty") or 0.0)),
+                "product_uom": product.uom_id.id,
+                "location_id": source.id,
+                "location_dest_id": destination.id,
+            }))
+        vals = {
+            "picking_type_id": picking_type.id,
+            "location_id": move_commands[0][2]["location_id"],
+            "location_dest_id": move_commands[0][2]["location_dest_id"],
+            "origin": ref,
+            "scheduled_date": data.get("date") or fields.Datetime.now(),
+            "company_id": self.company.id,
+            "move_ids": move_commands,
+        }
+        if not picking:
+            picking = Picking.create(vals)
+        elif picking.state == "draft":
+            picking.move_ids.unlink()
+            picking.write(vals)
+        if self.instance.auto_post and picking.state == "draft":
+            picking.action_confirm()
+            for move in picking.move_ids:
+                move.quantity = move.product_uom_qty
+            picking._action_done()
+        return picking
+
     # =========================================================================
     # HELPER LOOKUPS
     # =========================================================================
@@ -1313,6 +1485,14 @@ class SyncEngine:
     def _update_mapping(self, entity, guid, masterid, model_name, res_id, content_hash, origin):
         Mapping = self.env["tally.mapping"]
         rec = self._get_mapping(entity, guid)
+        identity_mapping = Mapping.search([
+            ("instance_id", "=", self.instance.id),
+            ("entity", "=", entity),
+            ("odoo_model_name", "=", model_name),
+            ("odoo_res_id", "=", res_id),
+        ], limit=1)
+        if not rec and identity_mapping:
+            rec = identity_mapping
         vals = {
             "instance_id": self.instance.id,
             "entity": entity,
@@ -1327,6 +1507,15 @@ class SyncEngine:
         }
         if rec:
             rec.write(vals)
+            duplicates = Mapping.search([
+                ("instance_id", "=", self.instance.id),
+                ("entity", "=", entity),
+                ("odoo_model_name", "=", model_name),
+                ("odoo_res_id", "=", res_id),
+                ("id", "!=", rec.id),
+            ])
+            if duplicates:
+                duplicates.unlink()
         else:
             rec = Mapping.create(vals)
         return rec

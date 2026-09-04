@@ -13,6 +13,10 @@ class TallyDiscoveredCompany(models.Model):
     _order = "name"
 
     name = fields.Char(string="Tally Company", required=True, index=True)
+    reporter_instance_id = fields.Many2one(
+        "tally.instance", string="Reported By", ondelete="cascade", index=True)
+    company_id = fields.Many2one(
+        related="reporter_instance_id.company_id", store=True, index=True)
     odoo_company_id = fields.Many2one("res.company", string="Map to Odoo Company")
     instance_id = fields.Many2one("tally.instance", string="Paired Instance", readonly=True)
     state = fields.Selection(
@@ -20,9 +24,10 @@ class TallyDiscoveredCompany(models.Model):
         default="new", index=True)
     last_seen = fields.Datetime(readonly=True)
 
-    _sql_constraints = [
-        ("name_uniq", "unique(name)", "This Tally company is already listed."),
-    ]
+    _name_uniq = models.Constraint(
+        "UNIQUE(reporter_instance_id, name)",
+        "This Tally company is already listed for this reporting instance.",
+    )
 
     def action_create_instance(self):
         """Create (or link) a tally.instance for this Tally company."""

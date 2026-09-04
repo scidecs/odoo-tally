@@ -26,9 +26,12 @@ class TallySyncQueue(models.Model):
         default="pending", tracking=True, index=True)
     attempts = fields.Integer(default=0)
     error = fields.Text()
+    sent_at = fields.Datetime(
+        string="Agent Lease Time", copy=False, index=True,
+        help="Time this item was leased to an agent. Expired leases are returned to Pending.")
 
     def action_retry(self):
-        self.write({"state": "pending", "error": False})
+        self.write({"state": "pending", "sent_at": False, "error": False})
         return True
 
     def action_open_record(self):

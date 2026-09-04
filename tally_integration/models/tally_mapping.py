@@ -39,7 +39,26 @@ class TallyMapping(models.Model):
     )
 
     @api.model
-    def register_outbound(self, instance, entity, model_name, res_id, payload_xml, guid=None):
+    def outbound_guid(self, instance, entity, model_name, res_id):
+        """Return a stable RFC-4122 GUID that Tally will echo on later exports."""
+        import uuid
+        existing = self.search([
+            ("instance_id", "=", instance.id),
+            ("entity", "=", entity),
+            ("odoo_model_name", "=", model_name),
+            ("odoo_res_id", "=", res_id),
+        ], limit=1)
+        # Keep a GUID supplied by Tally, but migrate the legacy synthetic
+        # ``odoo_<entity>_<id>`` identity to a real GUID before the next push.
+        if existing and existing.tally_guid and not existing.tally_guid.startswith("odoo_"):
+            return existing.tally_guid
+        db_uuid = self.env["ir.config_parameter"].sudo().get_param("database.uuid") or self.env.cr.dbname
+        seed = "%s:%s:%s:%s:%s" % (db_uuid, instance.id, entity, model_name, res_id)
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, seed))
+
+    @api.model
+    def register_outbound(self, instance, entity, model_name, res_id, payload_xml,
+                          guid=None, allow_tally_origin=False):
         """Register or check outbound record for echo and re-push suppression.
 
         Returns:
@@ -54,10 +73,17 @@ class TallyMapping(models.Model):
         ], limit=1)
 
         if mapping:
-            # If origin was Tally and content has not changed (e.g. manual post of imported voucher), skip re-pushing!
-            if mapping.last_origin == "tally" and mapping.content_hash == p_hash:
+            cfg = instance.entity_config_ids.filtered(lambda c: c.entity == entity)[:1]
+            if mapping.last_origin == "odoo" and mapping.content_hash == p_hash:
                 return False
+            if mapping.last_origin == "tally":
+                # Posting an imported invoice/payment changes workflow state but not its
+                # accounting payload. Never bounce that event back to Tally. Master write
+                # hooks may explicitly allow a real Odoo edit when policy permits it.
+                if not allow_tally_origin or (cfg and cfg.source_of_truth in ("tally", "tally_master")):
+                    return False
             mapping.write({
+                "tally_guid": guid or mapping.tally_guid,
                 "last_origin": "odoo",
                 "content_hash": p_hash,
                 "last_sync": fields.Datetime.now(),
@@ -68,7 +94,7 @@ class TallyMapping(models.Model):
             self.create({
                 "instance_id": instance.id,
                 "entity": entity,
-                "tally_guid": guid or f"odoo_{entity}_{res_id}",
+                "tally_guid": guid or self.outbound_guid(instance, entity, model_name, res_id),
                 "odoo_model_name": model_name,
                 "odoo_res_id": res_id,
                 "content_hash": p_hash,

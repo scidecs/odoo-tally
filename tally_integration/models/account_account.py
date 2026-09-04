@@ -56,11 +56,14 @@ class AccountAccount(models.Model):
                 return
 
             from ..services import tally_xml_builder
+            guid = self.env["tally.mapping"].outbound_guid(
+                instance, "account_ledger", self._name, self.id)
             parent_group = _TYPE_TO_GROUP.get(self.account_type, "Indirect Expenses")
             msg_xml = tally_xml_builder.build_account_ledger_xml(
                 name=self.name,
                 parent=parent_group,
                 currency=self.currency_id.name if self.currency_id else "INR",
+                guid=guid,
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company)
@@ -71,6 +74,8 @@ class AccountAccount(models.Model):
                 model_name=self._name,
                 res_id=self.id,
                 payload_xml=envelope_xml,
+                guid=guid,
+                allow_tally_origin=True,
             )
             if not should_enqueue:
                 return

@@ -44,6 +44,8 @@ class AccountMove(models.Model):
                 return
 
             from ..services import tally_xml_builder
+            guid = self.env["tally.mapping"].outbound_guid(
+                instance, entity, self._name, self.id)
             vch_type = _VCH_TYPE.get(entity, "Journal")
             party_name = self.partner_id.name or "Cash"
             accounts_only = instance.tally_inventory == "accounts_only"
@@ -97,7 +99,9 @@ class AccountMove(models.Model):
 
                 for tax_line in self.line_ids.filtered(lambda l: l.tax_line_id):
                     tax_acc = tax_line.name or (tax_line.account_id.name if tax_line.account_id else "Duties & Taxes")
-                    tax_amt = tax_line.balance if is_debit_party else -tax_line.balance
+                    # Tally's voucher sign convention is the inverse of the
+                    # Odoo journal-line balance for every invoice/refund type.
+                    tax_amt = -tax_line.balance
                     ledger_entries.append({
                         "ledger": tax_acc,
                         "amount": tax_amt,
@@ -113,6 +117,7 @@ class AccountMove(models.Model):
                 narration=self.narration or self.ref,
                 reference=self.ref,
                 is_invoice=(self.move_type != "entry"),
+                guid=guid,
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company, report_type="Vouchers")
@@ -123,6 +128,7 @@ class AccountMove(models.Model):
                 model_name=self._name,
                 res_id=self.id,
                 payload_xml=envelope_xml,
+                guid=guid,
             )
             if not should_enqueue:
                 return

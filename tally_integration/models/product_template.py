@@ -40,13 +40,34 @@ class ProductTemplate(models.Model):
                 return
 
             from ..services import tally_xml_builder
+            identity = self.product_variant_id
+            if not identity:
+                return
+            # Inbound stock items map to product.product.  Keep outbound on the
+            # same model so a recovered product retains one Tally GUID instead
+            # of becoming a second master after the database is rebuilt.
+            legacy_mapping = self.env["tally.mapping"].search([
+                ("instance_id", "=", instance.id), ("entity", "=", "stock_item"),
+                ("odoo_model_name", "=", self._name), ("odoo_res_id", "=", self.id),
+            ], limit=1)
+            if legacy_mapping and not self.env["tally.mapping"].search_count([
+                    ("instance_id", "=", instance.id), ("entity", "=", "stock_item"),
+                    ("odoo_model_name", "=", identity._name), ("odoo_res_id", "=", identity.id)]):
+                legacy_mapping.write({
+                    "odoo_model_name": identity._name, "odoo_res_id": identity.id,
+                })
+            guid = self.env["tally.mapping"].outbound_guid(
+                instance, "stock_item", identity._name, identity.id)
+            uom_name = self.uom_id.name if self.uom_id else "Nos"
+            base_uom = "Nos" if uom_name in ("Units", "Unit(s)", "Nos", "Unit") else uom_name
             msg_xml = tally_xml_builder.build_stock_item_xml(
                 name=self.name,
-                base_uom=self.uom_id.name if self.uom_id else "Nos",
+                base_uom=base_uom,
                 parent_group=self.categ_id.name if self.categ_id else "Primary",
                 hsn_code=getattr(self, "l10n_in_hsn_code", None),
                 standard_cost=self.standard_price,
                 sale_price=self.list_price,
+                guid=guid,
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company)
@@ -54,9 +75,11 @@ class ProductTemplate(models.Model):
             should_enqueue = self.env["tally.mapping"].register_outbound(
                 instance=instance,
                 entity="stock_item",
-                model_name=self._name,
-                res_id=self.id,
+                model_name=identity._name,
+                res_id=identity.id,
                 payload_xml=envelope_xml,
+                guid=guid,
+                allow_tally_origin=True,
             )
             if not should_enqueue:
                 return
@@ -64,10 +87,10 @@ class ProductTemplate(models.Model):
             self.env["tally.sync.queue"].create({
                 "instance_id": instance.id,
                 "entity": "stock_item",
-                "odoo_model_name": self._name,
-                "odoo_res_id": self.id,
+                "odoo_model_name": identity._name,
+                "odoo_res_id": identity.id,
                 "idempotency_key": "odoo_product_%s_%s" % (
-                    self.id, self.write_date and self.write_date.strftime("%Y%m%d%H%M%S") or ""),
+                    identity.id, self.write_date and self.write_date.strftime("%Y%m%d%H%M%S") or ""),
                 "payload": envelope_xml,
                 "state": "pending",
             })

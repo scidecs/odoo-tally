@@ -32,19 +32,24 @@ class AccountPayment(models.Model):
                 return
 
             from ..services import tally_xml_builder
+            guid = self.env["tally.mapping"].outbound_guid(
+                instance, entity, self._name, self.id)
             party_name = self.partner_id.name or "Cash"
             journal = self.journal_id
+            pay_ref = getattr(self, "memo", False) or self.name or str(self.id)
 
             # Resolve mapped Tally bank/cash ledger name
             bank_or_cash = None
             if journal.default_account_id:
                 mapping = self.env["tally.mapping"].search([
                     ("instance_id", "=", instance.id),
-                    ("odoo_model", "=", "account.account"),
-                    ("odoo_id", "=", journal.default_account_id.id),
+                    ("odoo_model_name", "=", "account.account"),
+                    ("odoo_res_id", "=", journal.default_account_id.id),
                 ], limit=1)
-                if mapping and mapping.tally_name:
-                    bank_or_cash = mapping.tally_name
+                if mapping and mapping.tally_guid and not mapping.tally_guid.startswith("odoo_"):
+                    # Tally's display name is not stored separately in the identity map.
+                    # The Odoo account name is the canonical outbound ledger name.
+                    bank_or_cash = journal.default_account_id.name
                 else:
                     bank_or_cash = journal.default_account_id.name
 
@@ -64,7 +69,6 @@ class AccountPayment(models.Model):
                     })
 
             if not bill_allocs:
-                pay_ref = getattr(self, "memo", False) or self.name or str(self.id)
                 alloc_type = "Agst Ref" if getattr(self, "memo", False) else "On Account"
                 bill_allocs.append({
                     "type": alloc_type,
@@ -92,6 +96,7 @@ class AccountPayment(models.Model):
                 narration=getattr(self, "memo", False),
                 reference=pay_ref,
                 is_invoice=False,
+                guid=guid,
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company, report_type="Vouchers")
@@ -102,6 +107,7 @@ class AccountPayment(models.Model):
                 model_name=self._name,
                 res_id=self.id,
                 payload_xml=envelope_xml,
+                guid=guid,
             )
             if not should_enqueue:
                 return

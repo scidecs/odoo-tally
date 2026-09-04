@@ -181,6 +181,44 @@ def parse_units_from_xml(root):
     return units
 
 
+def parse_stock_groups_from_xml(root):
+    """Parse all <STOCKGROUP> elements from XML."""
+    groups = []
+    for group in root.iter("STOCKGROUP"):
+        name = group.attrib.get("NAME") or _clean_text(group, "NAME")
+        if name:
+            groups.append({
+                "name": name,
+                "parent": _clean_text(group, "PARENT", "Primary"),
+                "guid": _clean_text(group, "GUID"),
+                "alterid": _clean_text(group, "ALTERID"),
+            })
+    return groups
+
+
+def filter_ledgers_for_entity(records, entity):
+    """Split Tally's single Ledger collection into parties, taxes, and accounts."""
+    result = []
+    for record in records or []:
+        parent = (record.get("parent") or "").lower()
+        taxish = bool(record.get("tax_type") or record.get("gst_duty_head")
+                      or any(k in parent for k in ("duties", "tax", "tds", "tcs")))
+        party = any(k in parent for k in (
+            "sundry debt", "sundry credit", "customer", "vendor", "supplier"))
+        if entity == "tax" and taxish:
+            result.append(record)
+        elif entity == "ledger" and party and not taxish:
+            result.append(record)
+        elif entity == "opening_balance" and not taxish:
+            # Opening balances apply to both party and general ledgers.  The
+            # ledger/account_ledger streams remain split to avoid creating
+            # banks and income accounts as contacts.
+            result.append(record)
+        elif entity == "account_ledger" and not party and not taxish:
+            result.append(record)
+    return result
+
+
 def parse_stock_items_from_xml(root):
     """Parse all <STOCKITEM> elements from XML with full inventory, rate, barcode, and batch/godown data."""
     items = []
@@ -329,6 +367,18 @@ def _parse_single_voucher_element(v):
         qty = _clean_float(ie, "ACTUALQTY", 0.0) or _clean_float(ie, "BILLEDQTY", 0.0)
         rate = _clean_float(ie, "RATE", 0.0)
         disc = _clean_float(ie, "DISCOUNT", 0.0)
+        gst_rate = (
+            _clean_float(ie, "GSTRATE", 0.0)
+            or _clean_float(ie, "GSTPERCENTAGE", 0.0)
+            or _clean_float(ie, "BASICRATEOFINVOICETAX", 0.0)
+        )
+        if not gst_rate:
+            for rate_node in ie.findall(".//RATEDETAILS.LIST") + ie.findall(".//GSTRATEDETAILS.LIST"):
+                gst_rate = (_clean_float(rate_node, "GSTRATE", 0.0)
+                            or _clean_float(rate_node, "GSTPERCENTAGE", 0.0)
+                            or _clean_float(rate_node, "GSTRATEVALUATION", 0.0))
+                if gst_rate:
+                    break
 
         # Godown
         godown = _clean_text(ie.find(".//BATCHALLOCATIONS.LIST"), "GODOWNNAME", "Main Location") if ie.find(".//BATCHALLOCATIONS.LIST") is not None else "Main Location"
@@ -339,6 +389,7 @@ def _parse_single_voucher_element(v):
             "rate": rate,
             "amount": amt,
             "discount": disc,
+            "gst_rate": gst_rate,
             "godown": godown,
         })
 
@@ -432,4 +483,3 @@ def iterparse_vouchers_from_xml(xml_stream_or_str):
             vch = _parse_single_voucher_element(elem)
             elem.clear()
             yield vch
-

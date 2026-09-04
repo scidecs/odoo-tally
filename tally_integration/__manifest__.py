@@ -18,7 +18,7 @@ and Odoo 19 (Odoo.sh / On-Premise). Tally is the default source of truth, config
 - Outbound queue + token-authenticated agent controllers for the on-prem Sync Agent.
 - Native Odoo UI dashboards: list / pivot / graph for sync monitoring.
 """,
-    "version": "19.0.1.0.0",
+    "version": "19.0.1.1.0",
     "category": "Accounting",
     "author": "Scidecs",
     "website": "https://www.scidecs.com",

@@ -16,7 +16,9 @@ def xml_escape(value):
         return ""
     if isinstance(value, bool):
         return "Yes" if value else "No"
-    return escape(str(value))
+    # Escape quotes as well as & < > so values used inside NAME="..." attributes
+    # (e.g. a party named M/s "Sharma" & Sons) cannot break the XML envelope.
+    return escape(str(value), {'"': "&quot;", "'": "&apos;"})
 
 
 def format_tally_date(dt, educational_mode=False):
@@ -96,15 +98,16 @@ def wrap_export_request(report_name, company_name=None, static_vars=None, tdl_co
 # MASTER XML BUILDERS
 # ==============================================================================
 
-def build_group_xml(name, parent="Primary", nature=None, guid=None):
+def build_group_xml(name, parent=None, nature=None, guid=None):
     """Build <GROUP> XML."""
     guid_tag = f'<GUID>{xml_escape(guid)}</GUID>' if guid else ''
     nature_tag = f'<NATUREOFGROUP>{xml_escape(nature)}</NATUREOFGROUP>' if nature else ''
+    parent_tag = f'<PARENT>{xml_escape(parent)}</PARENT>' if parent and parent != 'Primary' else '<PARENT/>'
     return f"""<TALLYMESSAGE xmlns:UDF="TallyUDF">
   <GROUP NAME="{xml_escape(name)}" ACTION="Create">
     {guid_tag}
     <NAME>{xml_escape(name)}</NAME>
-    <PARENT>{xml_escape(parent or 'Primary')}</PARENT>
+    {parent_tag}
     <ISSUBLEDGER>No</ISSUBLEDGER>
     <ISBILLWISEON>No</ISBILLWISEON>
     <ISCOSTCENTRESON>No</ISCOSTCENTRESON>
@@ -192,14 +195,15 @@ def build_unit_xml(name, formal_name=None, decimal_places=0, uqc=None, guid=None
 </TALLYMESSAGE>"""
 
 
-def build_stock_group_xml(name, parent="Primary", guid=None):
+def build_stock_group_xml(name, parent=None, guid=None):
     """Build <STOCKGROUP> XML."""
     guid_tag = f'<GUID>{xml_escape(guid)}</GUID>' if guid else ''
+    parent_tag = f'<PARENT>{xml_escape(parent)}</PARENT>' if parent and parent != 'Primary' else '<PARENT/>'
     return f"""<TALLYMESSAGE xmlns:UDF="TallyUDF">
   <STOCKGROUP NAME="{xml_escape(name)}" ACTION="Create">
     {guid_tag}
     <NAME>{xml_escape(name)}</NAME>
-    <PARENT>{xml_escape(parent or 'Primary')}</PARENT>
+    {parent_tag}
     <ISADDABLE>Yes</ISADDABLE>
   </STOCKGROUP>
 </TALLYMESSAGE>"""
@@ -220,7 +224,7 @@ def build_stock_item_xml(name, base_uom="Nos", parent_group="Primary", hsn_code=
     <OPENINGRATE>{float(opening_rate):.2f}</OPENINGRATE>
     <OPENINGVALUE>-{op_val:.2f}</OPENINGVALUE>""" if opening_qty else ""
 
-    parent_tag = f"<PARENT>{xml_escape(parent_group)}</PARENT>" if parent_group and parent_group != "Primary" else ""
+    parent_tag = f"<PARENT>{xml_escape(parent_group)}</PARENT>" if parent_group and parent_group != "Primary" else "<PARENT/>"
 
     return f"""<TALLYMESSAGE xmlns:UDF="TallyUDF">
   <STOCKITEM NAME="{xml_escape(name)}" ACTION="Create">
@@ -251,14 +255,15 @@ def build_cost_centre_xml(name, parent=None, category="Primary Cost Category", g
 </TALLYMESSAGE>"""
 
 
-def build_godown_xml(name, parent="Main Location", guid=None):
+def build_godown_xml(name, parent=None, guid=None):
     """Build <GODOWN> XML."""
     guid_tag = f'<GUID>{xml_escape(guid)}</GUID>' if guid else ''
+    parent_tag = f'<PARENT>{xml_escape(parent)}</PARENT>' if parent and parent not in ('Primary', 'Main Location') else '<PARENT/>'
     return f"""<TALLYMESSAGE xmlns:UDF="TallyUDF">
   <GODOWN NAME="{xml_escape(name)}" ACTION="Create">
     {guid_tag}
     <NAME>{xml_escape(name)}</NAME>
-    <PARENT>{xml_escape(parent or 'Primary')}</PARENT>
+    {parent_tag}
   </GODOWN>
 </TALLYMESSAGE>"""
 
@@ -435,9 +440,12 @@ COLLECTION_MAP = {
     "account_ledger": "Ledger",
     "ledger": "Ledger",
     "uom": "Unit",
+    "stock_group": "StockGroup",
     "stock_item": "StockItem",
     "cost_centre": "CostCentre",
     "godown": "Godown",
+    "tax": "Ledger",
+    "opening_balance": "Ledger",
 }
 
 

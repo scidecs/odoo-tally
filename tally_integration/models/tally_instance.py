@@ -3,6 +3,7 @@ import logging
 import secrets
 
 from odoo import _, api, fields, models
+from odoo.exceptions import UserError, ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -120,6 +121,12 @@ class TallyInstance(models.Model):
         string="Tally Mode", default="with_inventory", required=True,
         help="Match your Tally company. 'Accounts only' companies receive ledger-only "
              "vouchers (no inventory entries).")
+    sync_automated_valuation_stock = fields.Boolean(
+        string="Adjust Automated-Valuation Stock",
+        default=False,
+        help="Allow Tally quantities to create Odoo inventory valuation entries for automated-"
+             "valuation product categories. Keep disabled when financial opening balances are "
+             "also migrated, otherwise stock value can be counted twice.")
 
     # --- Onboarding / initial migration ---
     coa_mode = fields.Selection(
@@ -136,11 +143,14 @@ class TallyInstance(models.Model):
 
     # --- Agent pairing / health ---
     agent_token = fields.Char(
-        string="Agent Token", copy=False, readonly=True,
+        string="Agent Token", copy=False, readonly=True, index=True,
         groups="tally_integration.group_tally_manager",
         help="Bearer token the on-prem Sync Agent uses to authenticate. Keep secret.",
     )
     agent_last_seen = fields.Datetime(string="Agent Last Seen", readonly=True)
+    db_uuid = fields.Char(string="Bound DB UUID", readonly=True, copy=False,
+        help="Database this instance was activated in. If the DB is copied (staging/restore), "
+             "the sync auto-disables to prevent pushing test data to the live Tally.")
     state = fields.Selection(
         [("draft", "Draft"), ("online", "Online"), ("offline", "Offline")],
         default="draft", readonly=True, tracking=True,
@@ -160,6 +170,20 @@ class TallyInstance(models.Model):
         "UNIQUE(name, company_id)",
         "Instance name must be unique per company.",
     )
+
+    @api.constrains("active", "company_id")
+    def _check_single_active_instance_per_company(self):
+        """Prevent an outbound event being routed to an arbitrary Tally company."""
+        for instance in self.filtered("active"):
+            duplicate = self.search_count([
+                ("company_id", "=", instance.company_id.id),
+                ("active", "=", True),
+                ("id", "!=", instance.id),
+            ])
+            if duplicate:
+                raise ValidationError(_(
+                    "Only one active Tally instance is allowed per Odoo company. "
+                    "Archive the current instance before activating another one."))
 
     def _compute_counts(self):
         mapping = self.env["tally.mapping"]
@@ -404,6 +428,9 @@ class TallyInstance(models.Model):
         If a batch fails, it falls back to item-by-item dispatch to isolate individual errors.
         """
         self.ensure_one()
+        self._guard_environment()
+        if not self.active:
+            raise UserError(_("Synchronization is disabled because this database appears to be a copy."))
         import re
         from ..services import tally_transport, tally_xml_builder
         from ..services.tally_transport import TallyTransportError
@@ -439,10 +466,16 @@ class TallyInstance(models.Model):
                     extra_headers=ep["headers"], verify=ep["verify"])
                 contacted = True
                 result = tally_transport.parse_import_response(resp)
-                if result["errors"]:
+                changed = (result.get("created", 0) + result.get("altered", 0) +
+                           result.get("deleted", 0) + result.get("combined", 0) +
+                           result.get("ignored", 0))
+                if result.get("errors") or (not changed and result.get("line_error")):
                     item.write({"state": "failed", "attempts": item.attempts + 1,
-                                "error": result.get("line_error") or (resp or "")[:2000]})
-                    self._log_outbound(item, False, error=result.get("line_error"))
+                                "error": result.get("line_error") or
+                                         _("Ambiguous Tally response: no object count returned")})
+                    self._log_outbound(
+                        item, False, error=result.get("line_error") or
+                        _("Ambiguous Tally response: no object count returned"))
                 else:
                     item.write({"state": "acked", "attempts": item.attempts + 1, "error": False})
                     self._log_outbound(item, True)
@@ -491,7 +524,10 @@ class TallyInstance(models.Model):
                     contacted = True
                     result = tally_transport.parse_import_response(resp)
 
-                    if result["errors"] == 0 and (result["created"] > 0 or result["altered"] > 0):
+                    changed = (result.get("created", 0) + result.get("altered", 0) +
+                               result.get("deleted", 0) + result.get("combined", 0) +
+                               result.get("ignored", 0))
+                    if result.get("errors", 0) == 0 and changed >= len(batch):
                         # Whole batch succeeded!
                         for it in batch:
                             it.write({"state": "acked", "attempts": it.attempts + 1, "error": False})
@@ -540,6 +576,9 @@ class TallyInstance(models.Model):
         echo-suppressed, so a scheduled full pull is safe.
         """
         self.ensure_one()
+        self._guard_environment()
+        if not self.active:
+            raise UserError(_("Synchronization is disabled because this database appears to be a copy."))
         from datetime import date, timedelta
         from ..services import tally_transport, tally_xml_builder, tally_xml_parser
         from ..services.sync_engine import SyncEngine
@@ -549,9 +588,12 @@ class TallyInstance(models.Model):
             "account_ledger": tally_xml_parser.parse_ledgers_from_xml,
             "ledger": tally_xml_parser.parse_ledgers_from_xml,
             "uom": tally_xml_parser.parse_units_from_xml,
+            "stock_group": tally_xml_parser.parse_stock_groups_from_xml,
             "stock_item": tally_xml_parser.parse_stock_items_from_xml,
             "cost_centre": tally_xml_parser.parse_cost_centres_from_xml,
             "godown": tally_xml_parser.parse_godowns_from_xml,
+            "tax": tally_xml_parser.parse_ledgers_from_xml,
+            "opening_balance": tally_xml_parser.parse_ledgers_from_xml,
         }
         engine = SyncEngine(self.env, self)
         ep = self._tally_endpoint()
@@ -575,6 +617,8 @@ class TallyInstance(models.Model):
                                                 extra_headers=ep["headers"], verify=ep["verify"])
                 root = tally_xml_parser.parse_tally_xml_root(resp)
                 records = pfn(root) if root is not None else []
+                if cfg.entity in ("ledger", "account_ledger", "tax", "opening_balance"):
+                    records = tally_xml_parser.filter_ledgers_for_entity(records, cfg.entity)
                 if records:
                     res = engine.process_inbound_batch(cfg.entity, records)
                     pulled += (res or {}).get("processed", 0)
@@ -585,7 +629,7 @@ class TallyInstance(models.Model):
         # --- Vouchers (Day Book, date range) ---
         if include_vouchers and self.odoo_role != "operational":
             voucher_codes = {"sales", "credit_note", "purchase", "debit_note",
-                             "receipt", "payment", "journal", "contra"}
+                             "receipt", "payment", "journal", "contra", "stock_journal"}
             enabled_v = self.entity_config_ids.filtered(
                 lambda c: c.enabled and c.entity in voucher_codes
                 and c.direction in ("tally_to_odoo", "both"))
@@ -833,9 +877,27 @@ class TallyInstance(models.Model):
         stale.write({"state": "offline"})
         return True
 
+    def _guard_environment(self):
+        """Staging/DB-copy bleed guard: disable sync if the database was cloned."""
+        current = self.env["ir.config_parameter"].sudo().get_param("database.uuid")
+        for inst in self:
+            if not inst.db_uuid:
+                inst.db_uuid = current
+            elif current and inst.db_uuid != current:
+                inst.write({"active": False, "state": "offline"})
+                try:
+                    inst.message_post(body=_(
+                        "Sync auto-disabled: this database appears to be a COPY (uuid changed). "
+                        "Re-enable manually only on the intended environment."))
+                except Exception:
+                    pass
+                _logger.warning("Tally instance %s auto-disabled (staging bleed guard: db uuid mismatch).", inst.id)
+        return True
+
     @api.model
     def _cron_direct_sync(self):
         """For every direct-mode instance: push queued changes AND pull from Tally."""
+        self.search([("connection_mode", "=", "direct")])._guard_environment()
         instances = self.search([("active", "=", True), ("connection_mode", "=", "direct")])
         now = fields.Datetime.now()
         for inst in instances:

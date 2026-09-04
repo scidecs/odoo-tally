@@ -28,7 +28,7 @@ SOURCE_OF_TRUTH_SELECTION = [
     ("tally", "Tally (accounting system master)"),
     ("odoo", "Odoo (ERP master)"),
     ("tally_master", "Tally master (Odoo read-only)"),
-    ("bidirectional", "Bidirectional (last-write-wins)"),
+    ("bidirectional", "Bidirectional (serialized arrival order)"),
 ]
 
 DIRECTION_SELECTION = [
@@ -146,4 +146,3 @@ TDS_SECTIONS = {
     "206C": "TCS on Sale of Goods / Scrap / Minerals",
     "206C(1H)": "TCS on Sale of Goods exceeding 50L",
 }
-

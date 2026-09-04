@@ -46,6 +46,8 @@ class ResPartner(models.Model):
                 return
 
             from ..services import tally_xml_builder
+            guid = self.env["tally.mapping"].outbound_guid(
+                instance, "ledger", self._name, self.id)
             parent_group = "Sundry Creditors" if self.supplier_rank > 0 else "Sundry Debtors"
             msg_xml = tally_xml_builder.build_party_ledger_xml(
                 name=self.name,
@@ -59,6 +61,7 @@ class ResPartner(models.Model):
                 email=self.email,
                 phone=self.phone or getattr(self, "mobile", None),
                 credit_limit=getattr(self, "credit_limit", 0.0),
+                guid=guid,
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company)
@@ -69,6 +72,8 @@ class ResPartner(models.Model):
                 model_name=self._name,
                 res_id=self.id,
                 payload_xml=envelope_xml,
+                guid=guid,
+                allow_tally_origin=True,
             )
             if not should_enqueue:
                 return
