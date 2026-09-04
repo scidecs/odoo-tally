@@ -19,14 +19,21 @@ def xml_escape(value):
     return escape(str(value))
 
 
-def format_tally_date(dt):
-    """Format datetime or date into Tally YYYYMMDD string format."""
+def format_tally_date(dt, educational_mode=False):
+    """Format datetime or date into Tally YYYYMMDD string format with optional educational mode translation."""
     if not dt:
         return ""
     if hasattr(dt, "strftime"):
-        return dt.strftime("%Y%m%d")
-    clean = str(dt).replace("-", "").replace("/", "")[:8]
+        clean = dt.strftime("%Y%m%d")
+    else:
+        clean = str(dt).replace("-", "").replace("/", "")[:8]
+    if len(clean) == 8 and educational_mode:
+        # In Tally Educational mode, vouchers are only accepted on days 1, 2, and 31.
+        day = int(clean[6:8])
+        if day not in (1, 2, 31):
+            clean = f"{clean[:6]}01"
     return clean
+
 
 
 def wrap_import_envelope(tally_messages, company_name=None, report_type="All Masters"):

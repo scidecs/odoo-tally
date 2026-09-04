@@ -436,22 +436,41 @@ class SyncEngine:
 
         country_id = self.env["res.country"].search([("code", "=", "IN")], limit=1).id
 
+        # Smart Address Parsing (multi-split across street, street2, city, zip)
         street = ""
         street2 = ""
+        city = ""
+        zip_code = (data.get("pincode") or "").strip()
         addresses = data.get("addresses", [])
-        if len(addresses) > 0:
-            street = addresses[0]
-        if len(addresses) > 1:
-            street2 = ", ".join(addresses[1:])
+        if addresses:
+            cleaned_addrs = [a.strip() for a in addresses if a and a.strip()]
+            if len(cleaned_addrs) == 1:
+                street = cleaned_addrs[0]
+            elif len(cleaned_addrs) == 2:
+                street = cleaned_addrs[0]
+                street2 = cleaned_addrs[1]
+            elif len(cleaned_addrs) >= 3:
+                street = cleaned_addrs[0]
+                street2 = cleaned_addrs[1]
+                import re
+                for extra in cleaned_addrs[2:]:
+                    m = re.search(r"\b\d{6}\b", extra)
+                    if m and not zip_code:
+                        zip_code = m.group(0)
+                    if not city:
+                        cand = re.sub(r"\b\d{6}\b", "", extra).strip(", ")
+                        if cand and not any(s.lower() in cand.lower() for s in ("india", "pin", "state")):
+                            city = cand
 
         vals = {
             "name": name,
             "vat": gstin or False,
             "street": street or False,
             "street2": street2 or False,
+            "city": city or False,
             "state_id": state_id,
             "country_id": country_id,
-            "zip": data.get("pincode") or False,
+            "zip": zip_code or False,
             "email": data.get("email") or False,
             "phone": data.get("phone") or False,
             "company_id": self.company.id,
@@ -492,6 +511,7 @@ class SyncEngine:
         self._ensure_partner_accounts(rec)
         return rec
 
+
     def _upsert_uom(self, data):
         """Upsert uom.uom from Tally <UNIT>."""
         name = data.get("name")
@@ -522,7 +542,7 @@ class SyncEngine:
         return rec
 
     def _upsert_stock_item(self, data):
-        """Upsert product.product from Tally <STOCKITEM>."""
+        """Upsert product.product from Tally <STOCKITEM> with barcode, UoM, rate and stock quants."""
         name = data.get("name")
         if not name:
             return False
@@ -534,7 +554,14 @@ class SyncEngine:
         if mapping and mapping.odoo_res_id:
             rec = Product.browse(mapping.odoo_res_id).exists()
 
-        # 2. Search existing by name scoped to company
+        # 2. Search existing by barcode / default_code or name scoped to company
+        barcode = (data.get("barcode") or "").strip()
+        if not rec and barcode:
+            rec = Product.search([
+                "|", ("barcode", "=", barcode), ("default_code", "=", barcode),
+                ("company_id", "in", (False, self.company.id))
+            ], limit=1)
+
         if not rec:
             rec = Product.search([
                 ("name", "=ilike", name),
@@ -542,22 +569,29 @@ class SyncEngine:
             ], limit=1)
 
         uom_name = data.get("base_uom", "Units")
-        uom = self.env["uom.uom"].search([("name", "=", uom_name)], limit=1)
+        uom = self.env["uom.uom"].search([("name", "=ilike", uom_name)], limit=1)
         if not uom:
             uom = self.env.ref("uom.product_uom_unit", raise_if_not_found=False) or self.env["uom.uom"].search([], limit=1)
+
+        parent_grp = (data.get("parent_group") or "").lower()
+        is_service = any(k in parent_grp or k in name.lower() for k in ("service", "consulting", "freight", "labour", "fee"))
+        prod_type = "service" if is_service else "consu"
 
         rate = float(data.get("rate") or data.get("opening_rate") or data.get("closing_rate") or 0.0)
 
         vals = {
             "name": name,
-            "type": "consu",
+            "type": prod_type,
             "uom_id": uom.id if uom else False,
             "company_id": self.company.id,
         }
+        if barcode:
+            vals["barcode"] = barcode
+            vals["default_code"] = barcode
         if rate > 0:
             vals["standard_price"] = rate
 
-        if "is_storable" in Product._fields:
+        if "is_storable" in Product._fields and prod_type != "service":
             vals["is_storable"] = True
         # Check HSN code
         if data.get("hsn_code") and "l10n_in_hsn_code" in Product._fields:
@@ -568,11 +602,13 @@ class SyncEngine:
         else:
             rec = Product.create(vals)
 
-        # Apply stock on-hand quantity matching Tally closing/opening balance
-        target_qty = float(data.get("quantity") or data.get("closing_balance") or data.get("opening_balance") or 0.0)
-        self._apply_stock_quantities(rec, target_qty, data.get("batch_allocations"))
+        # Apply stock on-hand quantity matching Tally closing/opening balance (for physical inventory items)
+        if prod_type != "service":
+            target_qty = float(data.get("quantity") or data.get("closing_balance") or data.get("opening_balance") or 0.0)
+            self._apply_stock_quantities(rec, target_qty, data.get("batch_allocations"))
 
         return rec
+
 
     def _apply_stock_quantities(self, product, target_qty, batch_allocations=None):
         """Apply physical on-hand stock quantities to Odoo stock.quant."""
@@ -783,17 +819,43 @@ class SyncEngine:
                     tax = Tax.search(domain, limit=1)
 
             if not tax:
-                tax = Tax.create({
+                tax_vals = {
                     "name": tax_name,
                     "amount": calc_rate,
                     "amount_type": "percent",
                     "type_tax_use": tax_type,
                     "company_id": self.company.id,
-                })
+                }
+                # Tax Group lookup/creation
+                TaxGroup = self.env["account.tax.group"]
+                grp_name = "GST"
+                if "cgst" in tname_lower:
+                    grp_name = "CGST"
+                elif "sgst" in tname_lower or "utgst" in tname_lower:
+                    grp_name = "SGST"
+                elif "igst" in tname_lower:
+                    grp_name = "IGST"
+                elif "tds" in tname_lower:
+                    grp_name = "TDS"
+                elif "tcs" in tname_lower:
+                    grp_name = "TCS"
+                elif "cess" in tname_lower:
+                    grp_name = "Cess"
+
+                tg = TaxGroup.search([("name", "=ilike", grp_name), ("company_id", "in", (False, self.company.id))], limit=1)
+                if not tg:
+                    try:
+                        tg = TaxGroup.create({"name": grp_name, "company_id": self.company.id})
+                    except Exception:
+                        tg = TaxGroup.search([], limit=1)
+                if tg:
+                    tax_vals["tax_group_id"] = tg.id
+
+                tax = Tax.create(tax_vals)
         return tax
 
     def _upsert_invoice_move(self, data, move_type="out_invoice"):
-        """Generic handler for customer and vendor invoices/refunds with Indian GST, E-Way & IRN mapping."""
+        """Generic handler for customer and vendor invoices/refunds with Indian GST, POS, E-Way, IRN and rounding."""
         Move = self.env["account.move"]
         vch_num = data.get("voucher_number")
         date_str = data.get("date")
@@ -823,18 +885,21 @@ class SyncEngine:
         # 1. Detect GST / Tax ledgers from ledger_entries
         tax_ids = []
         extra_charge_lines = []
+        roundoff_amount = 0.0
         for le in data.get("ledger_entries", []):
             led = le.get("ledger", "")
             amt = abs(float(le.get("amount") or 0.0))
             if led == partner_name:
                 continue
             led_lower = led.lower()
-            if any(k in led_lower for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "duties", "tds", "tcs")):
+            if "round" in led_lower or "round off" in led_lower:
+                roundoff_amount = float(le.get("amount") or 0.0)
+            elif any(k in led_lower for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "duties", "tds", "tcs", "cess")):
                 tax_rec = self._find_or_create_tax(led, tax_type=tax_type)
                 if tax_rec and tax_rec.id not in tax_ids:
                     tax_ids.append(tax_rec.id)
             elif amt > 0:
-                # Supplementary charges / discounts / roundoff
+                # Supplementary charges / discounts / freight / packaging
                 charge_acc = self._get_or_create_account(led, default_type=default_acc_type)
                 extra_charge_lines.append((0, 0, {
                     "name": led,
@@ -864,7 +929,7 @@ class SyncEngine:
             # Fallback to ledger entries if pure accounting invoice
             for le in data.get("ledger_entries", []):
                 led = le.get("ledger", "")
-                if led != partner_name and not any(k in led.lower() for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "duties", "tds", "tcs")):
+                if led != partner_name and not any(k in led.lower() for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "duties", "tds", "tcs", "round")):
                     account = self._get_or_create_account(led, default_type=default_acc_type)
                     line_vals = {
                         "name": led or "Line",
@@ -878,6 +943,16 @@ class SyncEngine:
 
         # Add any extra non-tax ledger charge lines
         lines.extend(extra_charge_lines)
+
+        # Add explicit Round-Off line if present in Tally voucher
+        if roundoff_amount != 0.0:
+            round_acc = self._get_or_create_account("Round Off", default_type="expense")
+            lines.append((0, 0, {
+                "name": "Round Off",
+                "account_id": round_acc.id,
+                "quantity": 1,
+                "price_unit": abs(roundoff_amount) if roundoff_amount < 0 else -abs(roundoff_amount),
+            }))
 
         # Default Journal
         journal_type = "sale" if move_type in ("out_invoice", "out_refund") else "purchase"
@@ -901,6 +976,20 @@ class SyncEngine:
             "company_id": self.company.id,
             "journal_id": journal.id if journal else False,
         }
+
+        # Fiscal Position / Place of Supply
+        if partner and partner.state_id and self.company.state_id:
+            fp_domain = [("company_id", "in", (False, self.company.id))]
+            if partner.state_id.id != self.company.state_id.id:
+                # Inter-State
+                fp = self.env["account.fiscal.position"].search(fp_domain + [("name", "ilike", "inter")], limit=1)
+                if fp:
+                    vals["fiscal_position_id"] = fp.id
+            else:
+                # Intra-State
+                fp = self.env["account.fiscal.position"].search(fp_domain + [("name", "ilike", "intra")], limit=1)
+                if fp:
+                    vals["fiscal_position_id"] = fp.id
 
         # Indian Localization fields on Move
         if "l10n_in_state_id" in Move._fields and partner and partner.state_id:
@@ -928,6 +1017,16 @@ class SyncEngine:
             vals["invoice_line_ids"] = lines
             move = Move.create(vals)
 
+        # Post-sync audit chatter notification
+        if move and hasattr(move, "message_post"):
+            try:
+                move.message_post(
+                    body=f"Synced from Tally voucher <b>{vch_num or move.name}</b> (Type: {data.get('voucher_type')}, Date: {date_str})",
+                    message_type="notification"
+                )
+            except Exception:
+                pass
+
         if move and move.state == "draft" and self.instance.auto_post:
             try:
                 move.action_post()
@@ -935,6 +1034,7 @@ class SyncEngine:
                 _logger.info("Invoice auto-post skipped: %s", e)
 
         return move
+
 
     def _find_or_create_bank_journal(self, name):
         """Find or create matching account.journal for bank/cash ledger."""

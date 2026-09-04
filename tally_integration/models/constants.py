@@ -90,3 +90,60 @@ def direction_for_source(source_of_truth):
     if source_of_truth == "odoo":
         return "odoo_to_tally"
     return "both"
+
+
+INDIAN_GST_STATE_CODES = {
+    "01": "Jammu and Kashmir",
+    "02": "Himachal Pradesh",
+    "03": "Punjab",
+    "04": "Chandigarh",
+    "05": "Uttarakhand",
+    "06": "Haryana",
+    "07": "Delhi",
+    "08": "Rajasthan",
+    "09": "Uttar Pradesh",
+    "10": "Bihar",
+    "11": "Sikkim",
+    "12": "Arunachal Pradesh",
+    "13": "Nagaland",
+    "14": "Manipur",
+    "15": "Mizoram",
+    "16": "Tripura",
+    "17": "Meghalaya",
+    "18": "Assam",
+    "19": "West Bengal",
+    "20": "Jharkhand",
+    "21": "Odisha",
+    "22": "Chhattisgarh",
+    "23": "Madhya Pradesh",
+    "24": "Gujarat",
+    "26": "Dadra and Nagar Haveli and Daman and Diu",
+    "27": "Maharashtra",
+    "28": "Andhra Pradesh",
+    "29": "Karnataka",
+    "30": "Goa",
+    "31": "Lakshadweep",
+    "32": "Kerala",
+    "33": "Tamil Nadu",
+    "34": "Puducherry",
+    "35": "Andaman and Nicobar Islands",
+    "36": "Telangana",
+    "37": "Andhra Pradesh",
+    "38": "Ladakh",
+    "97": "Other Territory",
+    "99": "Centre Jurisdiction",
+}
+
+TDS_SECTIONS = {
+    "194C": "Payment to Contractors",
+    "194J": "Fees for Professional / Technical Services",
+    "194I": "Rent on Land / Building / Machinery",
+    "194Q": "TDS on Purchase of Goods",
+    "194H": "Commission or Brokerage",
+    "194A": "Interest other than Securities",
+    "194DA": "Payment in respect of Life Insurance Policy",
+    "194M": "Payment to Commission / Brokerage / Contractors by Ind / HUF",
+    "206C": "TCS on Sale of Goods / Scrap / Minerals",
+    "206C(1H)": "TCS on Sale of Goods exceeding 50L",
+}
+

@@ -182,7 +182,7 @@ def parse_units_from_xml(root):
 
 
 def parse_stock_items_from_xml(root):
-    """Parse all <STOCKITEM> elements from XML with full inventory, rate, and batch/godown data."""
+    """Parse all <STOCKITEM> elements from XML with full inventory, rate, barcode, and batch/godown data."""
     items = []
     for s in root.iter("STOCKITEM"):
         name = s.attrib.get("NAME") or _clean_text(s, "NAME")
@@ -204,6 +204,10 @@ def parse_stock_items_from_xml(root):
 
         on_hand_qty = cl_qty if cl_qty != 0.0 else op_qty
 
+        barcode = _clean_text(s, "BARCODE") or _clean_text(s, "PARTNO") or _clean_text(s, "MAILINGNAME")
+        if barcode == name:
+            barcode = ""
+
         batch_allocations = []
         for batch in s.iter("BATCHALLOCATIONS.LIST"):
             godown = _clean_text(batch, "GODOWNNAME", "")
@@ -223,6 +227,8 @@ def parse_stock_items_from_xml(root):
             "parent_group": _clean_text(s, "PARENT", "Primary"),
             "base_uom": _clean_text(s, "BASEUNITS", "Nos"),
             "hsn_code": _clean_text(s, "HSNCODE", "") or _clean_text(s, "HSNDESCRIPTION", ""),
+            "barcode": barcode,
+            "description": _clean_text(s, "DESCRIPTION", ""),
             "opening_balance": op_qty,
             "closing_balance": cl_qty,
             "quantity": on_hand_qty,
@@ -234,6 +240,7 @@ def parse_stock_items_from_xml(root):
             "alterid": _clean_text(s, "ALTERID"),
         })
     return items
+
 
 
 def parse_cost_centres_from_xml(root):
@@ -269,133 +276,160 @@ def parse_godowns_from_xml(root):
     return godowns
 
 
+def _parse_single_voucher_element(v):
+    """Parse a single <VOUCHER> ElementTree element into a dictionary."""
+    vch_type = v.attrib.get("VCHTYPE") or _clean_text(v, "VOUCHERTYPENAME")
+    vch_num = _clean_text(v, "VOUCHERNUMBER")
+    date = _parse_tally_date(_clean_text(v, "DATE"))
+    guid = _clean_text(v, "GUID")
+    alterid = _clean_text(v, "ALTERID")
+    party = _clean_text(v, "PARTYLEDGERNAME") or _clean_text(v, "PARTYNAME")
+    narration = _clean_text(v, "NARRATION")
+    reference = _clean_text(v, "REFERENCE")
+
+    # Parse Ledger Entries
+    ledger_entries = []
+    for le in v.findall(".//ALLLEDGERENTRIES.LIST"):
+        led_name = _clean_text(le, "LEDGERNAME")
+        if not led_name:
+            continue
+        amt = _clean_float(le, "AMOUNT", 0.0)
+
+        # Bill Allocations
+        bill_allocs = []
+        for ba in le.findall(".//BILLALLOCATIONS.LIST"):
+            bill_allocs.append({
+                "name": _clean_text(ba, "NAME"),
+                "type": _clean_text(ba, "BILLTYPE", "Agst Ref"),
+                "amount": _clean_float(ba, "AMOUNT", 0.0),
+            })
+
+        # Cost Centre Allocations
+        cc_allocs = []
+        for ca in le.findall(".//COSTCENTREALLOCATIONS.LIST"):
+            cc_allocs.append({
+                "name": _clean_text(ca, "NAME"),
+                "amount": _clean_float(ca, "AMOUNT", 0.0),
+            })
+
+        ledger_entries.append({
+            "ledger": led_name,
+            "amount": amt,
+            "bill_allocations": bill_allocs,
+            "cost_centres": cc_allocs,
+        })
+
+    # Parse Inventory Entries
+    inventory_entries = []
+    for ie in v.findall(".//ALLINVENTORYENTRIES.LIST"):
+        item_name = _clean_text(ie, "STOCKITEMNAME")
+        if not item_name:
+            continue
+        amt = _clean_float(ie, "AMOUNT", 0.0)
+        qty = _clean_float(ie, "ACTUALQTY", 0.0) or _clean_float(ie, "BILLEDQTY", 0.0)
+        rate = _clean_float(ie, "RATE", 0.0)
+        disc = _clean_float(ie, "DISCOUNT", 0.0)
+
+        # Godown
+        godown = _clean_text(ie.find(".//BATCHALLOCATIONS.LIST"), "GODOWNNAME", "Main Location") if ie.find(".//BATCHALLOCATIONS.LIST") is not None else "Main Location"
+
+        inventory_entries.append({
+            "item": item_name,
+            "qty": qty,
+            "rate": rate,
+            "amount": amt,
+            "discount": disc,
+            "godown": godown,
+        })
+
+    # E-Way Bill details
+    eway_elem = v.find(".//EWAYBILLDETAILS.LIST")
+    if eway_elem is None:
+        eway_elem = v.find(".//EWAYBILLDETAILS")
+    eway_bill_no = _clean_text(eway_elem, "EWAYBILLNO") if eway_elem is not None else _clean_text(v, "EWAYBILLNO")
+    eway_bill_date = _parse_tally_date(_clean_text(eway_elem, "EWAYBILLDATE") if eway_elem is not None else "")
+    vehicle_no = _clean_text(eway_elem, "VEHICLENO") if eway_elem is not None else _clean_text(v, "VEHICLENO")
+    distance = _clean_float(eway_elem, "TRANSPORTDISTANCE") if eway_elem is not None else _clean_float(v, "TRANSPORTDISTANCE")
+    transporter_name = _clean_text(eway_elem, "TRANSPORTERNAME") if eway_elem is not None else _clean_text(v, "TRANSPORTERNAME")
+    transporter_id = _clean_text(eway_elem, "TRANSPORTERID") if eway_elem is not None else _clean_text(v, "TRANSPORTERID")
+
+    # E-Invoice / IRN details
+    irn_elem = v.find(".//IRNDETAILS.LIST")
+    if irn_elem is None:
+        irn_elem = v.find(".//IRNDETAILS")
+    irn = _clean_text(irn_elem, "IRN") if irn_elem is not None else _clean_text(v, "IRN")
+    ack_no = _clean_text(irn_elem, "ACKNO") if irn_elem is not None else _clean_text(v, "ACKNO")
+    ack_date = _clean_text(irn_elem, "ACKDATE") if irn_elem is not None else _clean_text(v, "ACKDATE")
+    qrcode = _clean_text(irn_elem, "QRCODE") if irn_elem is not None else _clean_text(v, "SIGNEDQRCODE")
+
+    # State flags
+    is_cancelled = _clean_text(v, "ISCANCELLED").lower() in ("yes", "1", "true")
+    is_deleted = _clean_text(v, "ISDELETED").lower() in ("yes", "1", "true")
+    is_optional = _clean_text(v, "ISOPTIONAL").lower() in ("yes", "1", "true")
+
+    # Bank instrument allocations (cheque / transaction ref)
+    bank_elem = v.find(".//BANKALLOCATIONS.LIST")
+    cheque_no = _clean_text(bank_elem, "INSTRUMENTNUMBER") if bank_elem is not None else ""
+    cheque_date = _clean_text(bank_elem, "INSTRUMENTDATE") if bank_elem is not None else ""
+
+    # Place of supply / State
+    place_of_supply = _clean_text(v, "PLACEOFSUPPLY") or _clean_text(v, "STATENAME")
+
+    return {
+        "voucher_type": vch_type,
+        "voucher_number": vch_num,
+        "date": date,
+        "guid": guid,
+        "alterid": alterid,
+        "party_ledger": party,
+        "reference": reference,
+        "narration": narration,
+        "is_cancelled": is_cancelled,
+        "is_deleted": is_deleted,
+        "is_optional": is_optional,
+        "cheque_no": cheque_no,
+        "cheque_date": cheque_date,
+        "ledger_entries": ledger_entries,
+        "inventory_entries": inventory_entries,
+        "eway_bill_no": eway_bill_no,
+        "eway_bill_date": eway_bill_date,
+        "vehicle_no": vehicle_no,
+        "distance": distance,
+        "transporter_name": transporter_name,
+        "transporter_id": transporter_id,
+        "irn": irn,
+        "ack_no": ack_no,
+        "ack_date": ack_date,
+        "qrcode": qrcode,
+        "place_of_supply": place_of_supply,
+    }
+
+
 def parse_vouchers_from_xml(root):
-    """Parse all <VOUCHER> elements from XML."""
+    """Parse all <VOUCHER> elements from XML root."""
     vouchers = []
     for v in root.iter("VOUCHER"):
-        vch_type = v.attrib.get("VCHTYPE") or _clean_text(v, "VOUCHERTYPENAME")
-        vch_num = _clean_text(v, "VOUCHERNUMBER")
-        date = _parse_tally_date(_clean_text(v, "DATE"))
-        guid = _clean_text(v, "GUID")
-        alterid = _clean_text(v, "ALTERID")
-        party = _clean_text(v, "PARTYLEDGERNAME") or _clean_text(v, "PARTYNAME")
-        narration = _clean_text(v, "NARRATION")
-        reference = _clean_text(v, "REFERENCE")
-
-        # Parse Ledger Entries
-        ledger_entries = []
-        for le in v.findall(".//ALLLEDGERENTRIES.LIST"):
-            led_name = _clean_text(le, "LEDGERNAME")
-            if not led_name:
-                continue
-            amt = _clean_float(le, "AMOUNT", 0.0)
-
-            # Bill Allocations
-            bill_allocs = []
-            for ba in le.findall(".//BILLALLOCATIONS.LIST"):
-                bill_allocs.append({
-                    "name": _clean_text(ba, "NAME"),
-                    "type": _clean_text(ba, "BILLTYPE", "Agst Ref"),
-                    "amount": _clean_float(ba, "AMOUNT", 0.0),
-                })
-
-            # Cost Centre Allocations
-            cc_allocs = []
-            for ca in le.findall(".//COSTCENTREALLOCATIONS.LIST"):
-                cc_allocs.append({
-                    "name": _clean_text(ca, "NAME"),
-                    "amount": _clean_float(ca, "AMOUNT", 0.0),
-                })
-
-            ledger_entries.append({
-                "ledger": led_name,
-                "amount": amt,
-                "bill_allocations": bill_allocs,
-                "cost_centres": cc_allocs,
-            })
-
-        # Parse Inventory Entries
-        inventory_entries = []
-        for ie in v.findall(".//ALLINVENTORYENTRIES.LIST"):
-            item_name = _clean_text(ie, "STOCKITEMNAME")
-            if not item_name:
-                continue
-            amt = _clean_float(ie, "AMOUNT", 0.0)
-            qty = _clean_float(ie, "ACTUALQTY", 0.0) or _clean_float(ie, "BILLEDQTY", 0.0)
-            rate = _clean_float(ie, "RATE", 0.0)
-            disc = _clean_float(ie, "DISCOUNT", 0.0)
-
-            # Godown
-            godown = _clean_text(ie.find(".//BATCHALLOCATIONS.LIST"), "GODOWNNAME", "Main Location") if ie.find(".//BATCHALLOCATIONS.LIST") is not None else "Main Location"
-
-            inventory_entries.append({
-                "item": item_name,
-                "qty": qty,
-                "rate": rate,
-                "amount": amt,
-                "discount": disc,
-                "godown": godown,
-            })
-
-        # E-Way Bill details
-        eway_elem = v.find(".//EWAYBILLDETAILS.LIST")
-        if eway_elem is None:
-            eway_elem = v.find(".//EWAYBILLDETAILS")
-        eway_bill_no = _clean_text(eway_elem, "EWAYBILLNO") if eway_elem is not None else _clean_text(v, "EWAYBILLNO")
-        eway_bill_date = _parse_tally_date(_clean_text(eway_elem, "EWAYBILLDATE") if eway_elem is not None else "")
-        vehicle_no = _clean_text(eway_elem, "VEHICLENO") if eway_elem is not None else _clean_text(v, "VEHICLENO")
-        distance = _clean_float(eway_elem, "TRANSPORTDISTANCE") if eway_elem is not None else _clean_float(v, "TRANSPORTDISTANCE")
-        transporter_name = _clean_text(eway_elem, "TRANSPORTERNAME") if eway_elem is not None else _clean_text(v, "TRANSPORTERNAME")
-        transporter_id = _clean_text(eway_elem, "TRANSPORTERID") if eway_elem is not None else _clean_text(v, "TRANSPORTERID")
-
-        # E-Invoice / IRN details
-        irn_elem = v.find(".//IRNDETAILS.LIST")
-        if irn_elem is None:
-            irn_elem = v.find(".//IRNDETAILS")
-        irn = _clean_text(irn_elem, "IRN") if irn_elem is not None else _clean_text(v, "IRN")
-        ack_no = _clean_text(irn_elem, "ACKNO") if irn_elem is not None else _clean_text(v, "ACKNO")
-        ack_date = _clean_text(irn_elem, "ACKDATE") if irn_elem is not None else _clean_text(v, "ACKDATE")
-        qrcode = _clean_text(irn_elem, "QRCODE") if irn_elem is not None else _clean_text(v, "SIGNEDQRCODE")
-
-        # State flags
-        is_cancelled = _clean_text(v, "ISCANCELLED").lower() in ("yes", "1", "true")
-        is_deleted = _clean_text(v, "ISDELETED").lower() in ("yes", "1", "true")
-        is_optional = _clean_text(v, "ISOPTIONAL").lower() in ("yes", "1", "true")
-
-        # Bank instrument allocations (cheque / transaction ref)
-        bank_elem = v.find(".//BANKALLOCATIONS.LIST")
-        cheque_no = _clean_text(bank_elem, "INSTRUMENTNUMBER") if bank_elem is not None else ""
-        cheque_date = _clean_text(bank_elem, "INSTRUMENTDATE") if bank_elem is not None else ""
-
-        # Place of supply / State
-        place_of_supply = _clean_text(v, "PLACEOFSUPPLY") or _clean_text(v, "STATENAME")
-
-        vouchers.append({
-            "voucher_type": vch_type,
-            "voucher_number": vch_num,
-            "date": date,
-            "guid": guid,
-            "alterid": alterid,
-            "party_ledger": party,
-            "reference": reference,
-            "narration": narration,
-            "is_cancelled": is_cancelled,
-            "is_deleted": is_deleted,
-            "is_optional": is_optional,
-            "cheque_no": cheque_no,
-            "cheque_date": cheque_date,
-            "ledger_entries": ledger_entries,
-            "inventory_entries": inventory_entries,
-            "eway_bill_no": eway_bill_no,
-            "eway_bill_date": eway_bill_date,
-            "vehicle_no": vehicle_no,
-            "distance": distance,
-            "transporter_name": transporter_name,
-            "transporter_id": transporter_id,
-            "irn": irn,
-            "ack_no": ack_no,
-            "ack_date": ack_date,
-            "qrcode": qrcode,
-            "place_of_supply": place_of_supply,
-        })
+        vch = _parse_single_voucher_element(v)
+        if vch.get("voucher_type") or vch.get("voucher_number"):
+            vouchers.append(vch)
     return vouchers
+
+
+def iterparse_vouchers_from_xml(xml_stream_or_str):
+    """Streaming iterator over <VOUCHER> elements to handle massive Day Book exports with minimal RAM."""
+    import io
+    if isinstance(xml_stream_or_str, str):
+        # Sanitize control characters
+        clean_xml = re.sub(r"&#0*([0-8]|1[1-2]|1[4-9]|2[0-9]|3[0-1]);", "", xml_stream_or_str)
+        clean_xml = re.sub(r"&#x0*([0-8BbCcEeFf]|1[0-9A-Fa-f]);", "", clean_xml)
+        source = io.StringIO(clean_xml)
+    else:
+        source = xml_stream_or_str
+
+    context = ET.iterparse(source, events=("end",))
+    for event, elem in context:
+        if elem.tag == "VOUCHER":
+            vch = _parse_single_voucher_element(elem)
+            elem.clear()
+            yield vch
+
