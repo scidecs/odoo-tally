@@ -313,6 +313,20 @@ def main():
         instance = env["tally.instance"].browse(args.instance_id).exists()
         if not instance:
             raise SystemExit(f"Tally instance {args.instance_id} does not exist")
+        # Ensure live Tally is online
+        import urllib.request
+        live_url = f"http://{instance.tally_host}:{instance.tally_port}"
+        try:
+            test_req = urllib.request.Request(
+                live_url,
+                data=b"<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>Company</ID></HEADER><BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES></DESC></BODY></ENVELOPE>",
+                headers={"Content-Type": "text/xml"}
+            )
+            with urllib.request.urlopen(test_req, timeout=5) as r:
+                pass
+        except Exception as e:
+            raise SystemExit(f"[PAUSED] Real Live Tally server at {live_url} is offline: {e}")
+
         if args.mode == "seed":
             seeded = seed(env, instance)
             cr.commit()
