@@ -33,7 +33,11 @@ def post_xml(url, xml, timeout=30, auth=None, extra_headers=None, verify=True):
     :param verify: verify TLS certificate for HTTPS endpoints
     """
     data = (xml or "").encode("utf-8")
-    headers = {"Content-Type": "text/xml; charset=utf-8"}
+    headers = {
+        "Content-Type": "text/xml; charset=utf-8",
+        "Content-Length": str(len(data)),
+        "Connection": "close",
+    }
     if auth and auth[0]:
         token = base64.b64encode(("%s:%s" % (auth[0], auth[1] or "")).encode("utf-8")).decode("ascii")
         headers["Authorization"] = "Basic " + token

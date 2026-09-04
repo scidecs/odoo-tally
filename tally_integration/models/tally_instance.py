@@ -423,14 +423,19 @@ class TallyInstance(models.Model):
             return re.findall(r"(<TALLYMESSAGE[\s\S]*?</TALLYMESSAGE>)", xml_text or "")
 
         def _detect_report_type(xml_text):
+            if "<VOUCHER" in (xml_text or ""):
+                return "Vouchers"
             m = re.search(r"<ID>(.*?)</ID>", xml_text or "")
             return m.group(1) if m else "All Masters"
 
         def _dispatch_single_item(item):
             nonlocal contacted
             try:
+                payload = item.payload or ""
+                if "<VOUCHER" in payload and "<ID>All Masters</ID>" in payload:
+                    payload = payload.replace("<ID>All Masters</ID>", "<ID>Vouchers</ID>")
                 resp = tally_transport.post_xml(
-                    ep["url"], item.payload, auth=ep["auth"],
+                    ep["url"], payload, auth=ep["auth"],
                     extra_headers=ep["headers"], verify=ep["verify"])
                 contacted = True
                 result = tally_transport.parse_import_response(resp)
