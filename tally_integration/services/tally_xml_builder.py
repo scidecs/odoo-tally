@@ -57,13 +57,14 @@ def wrap_import_envelope(tally_messages, company_name=None, report_type="All Mas
 
 def wrap_export_request(report_name, company_name=None, static_vars=None, tdl_collection=None):
     """Build a TDL export request envelope for polling or fetching data."""
-    vars_xml = []
+    vars_xml = ["<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>"]
     if company_name:
         vars_xml.append(f"<SVCURRENTCOMPANY>{xml_escape(company_name)}</SVCURRENTCOMPANY>")
     if static_vars:
         for k, v in static_vars.items():
-            vars_xml.append(f"<{k}>{xml_escape(v)}</{k}>")
-    vars_str = "\n        ".join(vars_xml)
+            if k != "SVEXPORTFORMAT":
+                vars_xml.append(f"<{k}>{xml_escape(v)}</{k}>")
+    vars_str = "\n          ".join(vars_xml)
 
     tdl_xml = f"\n    <TDL>{tdl_collection}</TDL>" if tdl_collection else ""
 
