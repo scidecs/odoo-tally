@@ -34,21 +34,52 @@ class AccountPayment(models.Model):
             from ..services import tally_xml_builder
             party_name = self.partner_id.name or "Cash"
             journal = self.journal_id
-            bank_or_cash = (journal.default_account_id.name if journal.default_account_id else None) or journal.name or ("Bank" if journal.type == "bank" else "Cash")
-            # account.payment has no 'ref' field in recent Odoo; use memo/name safely.
-            pay_ref = getattr(self, "memo", False) or self.name or str(self.id)
-            alloc_type = "Agst Ref" if pay_ref else "On Account"
+
+            # Resolve mapped Tally bank/cash ledger name
+            bank_or_cash = None
+            if journal.default_account_id:
+                mapping = self.env["tally.mapping"].search([
+                    ("instance_id", "=", instance.id),
+                    ("odoo_model", "=", "account.account"),
+                    ("odoo_id", "=", journal.default_account_id.id),
+                ], limit=1)
+                if mapping and mapping.tally_name:
+                    bank_or_cash = mapping.tally_name
+                else:
+                    bank_or_cash = journal.default_account_id.name
+
+            if not bank_or_cash:
+                bank_or_cash = journal.name or ("Bank" if journal.type == "bank" else "Cash")
+
+            # Build real bill allocations from reconciled invoices/bills
+            bill_allocs = []
+            reconciled_moves = self.reconciled_invoice_ids or getattr(self, "reconciled_bill_ids", self.env["account.move"])
+            if reconciled_moves:
+                for inv in reconciled_moves:
+                    inv_ref = inv.ref or inv.name
+                    bill_allocs.append({
+                        "type": "Agst Ref",
+                        "name": inv_ref,
+                        "amount": self.amount if is_receipt else -self.amount,
+                    })
+
+            if not bill_allocs:
+                pay_ref = getattr(self, "memo", False) or self.name or str(self.id)
+                alloc_type = "Agst Ref" if getattr(self, "memo", False) else "On Account"
+                bill_allocs.append({
+                    "type": alloc_type,
+                    "name": pay_ref,
+                    "amount": self.amount if is_receipt else -self.amount,
+                })
 
             if is_receipt:
                 ledger_entries = [
-                    {"ledger": party_name, "amount": self.amount,
-                     "bill_allocations": [{"type": alloc_type, "name": pay_ref, "amount": self.amount}]},
+                    {"ledger": party_name, "amount": self.amount, "bill_allocations": bill_allocs},
                     {"ledger": bank_or_cash, "amount": -self.amount},
                 ]
             else:
                 ledger_entries = [
-                    {"ledger": party_name, "amount": -self.amount,
-                     "bill_allocations": [{"type": alloc_type, "name": pay_ref, "amount": -self.amount}]},
+                    {"ledger": party_name, "amount": -self.amount, "bill_allocations": bill_allocs},
                     {"ledger": bank_or_cash, "amount": self.amount},
                 ]
 

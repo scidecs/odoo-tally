@@ -910,6 +910,15 @@ class SyncEngine:
         if data.get("eway_bill_no") and "l10n_in_ewaybill_number" in Move._fields:
             vals["l10n_in_ewaybill_number"] = data["eway_bill_no"]
 
+        # Check cancelled / deleted state
+        if data.get("is_cancelled") or data.get("is_deleted"):
+            if move and move.state == "posted":
+                try:
+                    move.button_cancel()
+                except Exception as e:
+                    _logger.warning("Could not cancel move %s for deleted Tally voucher: %s", move.id, e)
+            return move
+
         if move:
             if move.state == "draft":
                 move.invoice_line_ids.unlink()
@@ -919,10 +928,83 @@ class SyncEngine:
             vals["invoice_line_ids"] = lines
             move = Move.create(vals)
 
+        if move and move.state == "draft" and self.instance.auto_post:
+            try:
+                move.action_post()
+            except Exception as e:
+                _logger.info("Invoice auto-post skipped: %s", e)
+
         return move
 
+    def _find_or_create_bank_journal(self, name):
+        """Find or create matching account.journal for bank/cash ledger."""
+        if not name:
+            return False
+        Journal = self.env["account.journal"]
+        j = Journal.search([
+            "|", ("name", "=ilike", name), ("default_account_id.name", "=ilike", name),
+            ("company_id", "=", self.company.id)
+        ], limit=1)
+        if j:
+            return j
+
+        acc = self._get_or_create_account(name, default_type="asset_cash")
+        j_type = "cash" if "cash" in name.lower() else "bank"
+        # Generate code from initials/prefix
+        words = "".join(c for c in name if c.isalnum())
+        code_cand = (words[:4] or ("CSH" if j_type == "cash" else "BNK")).upper()
+        code = code_cand
+        idx = 1
+        while Journal.search_count([("code", "=", code), ("company_id", "=", self.company.id)]):
+            code = f"{code_cand[:3]}{idx}"
+            idx += 1
+
+        try:
+            return Journal.create({
+                "name": name,
+                "type": j_type,
+                "code": code,
+                "default_account_id": acc.id if acc else False,
+                "company_id": self.company.id,
+            })
+        except Exception:
+            return self._get_or_create_journal(j_type)
+
+    def _reconcile_payment_with_allocations(self, payment, bill_allocs):
+        """Auto-reconcile payment move lines with allocated invoices/bills."""
+        Move = self.env["account.move"]
+        pay_lines = payment.move_id.line_ids.filtered(
+            lambda l: l.account_id.account_type in ("asset_receivable", "liability_payable") and not l.reconciled
+        )
+        if not pay_lines:
+            return
+
+        for alloc in bill_allocs:
+            inv_name = (alloc.get("name") or "").strip()
+            if not inv_name:
+                continue
+            inv_move = Move.search([
+                ("name", "=", inv_name),
+                ("company_id", "=", self.company.id),
+                ("state", "=", "posted"),
+            ], limit=1) or Move.search([
+                ("ref", "=", inv_name),
+                ("company_id", "=", self.company.id),
+                ("state", "=", "posted"),
+            ], limit=1)
+
+            if inv_move:
+                inv_lines = inv_move.line_ids.filtered(
+                    lambda l: l.account_id.account_type in ("asset_receivable", "liability_payable") and not l.reconciled
+                )
+                if inv_lines:
+                    try:
+                        (pay_lines + inv_lines).reconcile()
+                    except Exception as e:
+                        _logger.debug("Reconciliation failed for payment %s and invoice %s: %s", payment.id, inv_move.id, e)
+
     def _upsert_payment_receipt(self, data):
-        """Upsert account.payment from Tally Receipt or Payment Voucher."""
+        """Upsert account.payment from Tally Receipt or Payment Voucher with invoice auto-reconciliation."""
         Payment = self.env["account.payment"]
         vch_type = data.get("voucher_type", "").lower()
         is_receipt = "receipt" in vch_type
@@ -933,14 +1015,29 @@ class SyncEngine:
         partner_name = data.get("party_ledger")
         partner = self._get_or_create_partner(partner_name, is_supplier=not is_receipt)
 
-        # Compute total amount from ledger entries
         total_amount = 0.0
+        bank_cash_ledger = None
+        bill_allocs = []
+
         for le in data.get("ledger_entries", []):
+            led = le.get("ledger", "")
             amt = abs(float(le.get("amount") or 0.0))
             if amt > total_amount:
                 total_amount = amt
+            if led != partner_name and not any(k in led.lower() for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "tds", "tcs", "discount")):
+                bank_cash_ledger = led
+            if le.get("bill_allocations"):
+                bill_allocs.extend(le["bill_allocations"])
 
-        journal = self._get_or_create_journal("bank")
+        journal = False
+        if bank_cash_ledger:
+            journal = self._find_or_create_bank_journal(bank_cash_ledger)
+        if not journal:
+            journal = self._get_or_create_journal("bank" if "bank" in (bank_cash_ledger or "").lower() else "cash")
+
+        memo_parts = [vch_num]
+        if data.get("cheque_no"):
+            memo_parts.append(f"Chq: {data['cheque_no']}")
 
         vals = {
             "payment_type": pay_type,
@@ -948,21 +1045,88 @@ class SyncEngine:
             "partner_id": partner.id if partner else False,
             "amount": total_amount,
             "date": date_str,
-            "memo": vch_num,
+            "memo": " · ".join(memo_parts),
             "journal_id": journal.id if journal else False,
             "company_id": self.company.id,
         }
 
         rec = Payment.search([
-            ("memo", "=", vch_num),
+            ("memo", "=ilike", vch_num),
             ("payment_type", "=", pay_type),
             ("company_id", "=", self.company.id)
         ], limit=1)
 
         if rec:
-            rec.write(vals)
+            if rec.state == "draft":
+                rec.write(vals)
         else:
             rec = Payment.create(vals)
+
+        if rec and rec.state == "draft" and self.instance.auto_post:
+            try:
+                rec.action_post()
+                if bill_allocs:
+                    self._reconcile_payment_with_allocations(rec, bill_allocs)
+            except Exception as e:
+                _logger.info("Payment auto-post/reconcile skipped for %s: %s", rec.id, e)
+
+        return rec
+
+    def _upsert_contra_voucher(self, data):
+        """Upsert Contra voucher (Cash <-> Bank or Bank <-> Bank transfer) into Odoo."""
+        Move = self.env["account.move"]
+        vch_num = data.get("voucher_number")
+        date_str = data.get("date")
+
+        ledger_entries = data.get("ledger_entries", [])
+        if len(ledger_entries) < 2:
+            return False
+
+        lines = []
+        for le in ledger_entries:
+            led = le.get("ledger", "")
+            amt = float(le.get("amount") or 0.0)
+            account = self._get_or_create_account(led, default_type="asset_cash")
+            debit = abs(amt) if amt < 0 else 0.0
+            credit = abs(amt) if amt > 0 else 0.0
+            lines.append((0, 0, {
+                "name": f"Contra: {led}",
+                "account_id": account.id if account else False,
+                "debit": debit,
+                "credit": credit,
+            }))
+
+        journal = self._get_or_create_journal("general")
+
+        vals = {
+            "move_type": "entry",
+            "date": date_str,
+            "ref": vch_num,
+            "narration": data.get("narration") or f"<p>Tally Contra Voucher {vch_num}</p>",
+            "company_id": self.company.id,
+            "journal_id": journal.id if journal else False,
+            "line_ids": lines,
+        }
+
+        rec = Move.search([
+            ("ref", "=", vch_num),
+            ("move_type", "=", "entry"),
+            ("company_id", "=", self.company.id)
+        ], limit=1)
+
+        if rec:
+            if rec.state == "draft":
+                rec.line_ids.unlink()
+                rec.write(vals)
+        else:
+            rec = Move.create(vals)
+
+        if rec and rec.state == "draft" and self.instance.auto_post:
+            try:
+                rec.action_post()
+            except Exception as e:
+                _logger.info("Contra move auto-post skipped: %s", e)
+
         return rec
 
     def _upsert_journal_voucher(self, data):

@@ -357,6 +357,16 @@ def parse_vouchers_from_xml(root):
         ack_date = _clean_text(irn_elem, "ACKDATE") if irn_elem is not None else _clean_text(v, "ACKDATE")
         qrcode = _clean_text(irn_elem, "QRCODE") if irn_elem is not None else _clean_text(v, "SIGNEDQRCODE")
 
+        # State flags
+        is_cancelled = _clean_text(v, "ISCANCELLED").lower() in ("yes", "1", "true")
+        is_deleted = _clean_text(v, "ISDELETED").lower() in ("yes", "1", "true")
+        is_optional = _clean_text(v, "ISOPTIONAL").lower() in ("yes", "1", "true")
+
+        # Bank instrument allocations (cheque / transaction ref)
+        bank_elem = v.find(".//BANKALLOCATIONS.LIST")
+        cheque_no = _clean_text(bank_elem, "INSTRUMENTNUMBER") if bank_elem is not None else ""
+        cheque_date = _clean_text(bank_elem, "INSTRUMENTDATE") if bank_elem is not None else ""
+
         # Place of supply / State
         place_of_supply = _clean_text(v, "PLACEOFSUPPLY") or _clean_text(v, "STATENAME")
 
@@ -369,6 +379,11 @@ def parse_vouchers_from_xml(root):
             "party_ledger": party,
             "reference": reference,
             "narration": narration,
+            "is_cancelled": is_cancelled,
+            "is_deleted": is_deleted,
+            "is_optional": is_optional,
+            "cheque_no": cheque_no,
+            "cheque_date": cheque_date,
             "ledger_entries": ledger_entries,
             "inventory_entries": inventory_entries,
             "eway_bill_no": eway_bill_no,
