@@ -546,13 +546,16 @@ class SyncEngine:
         if not uom:
             uom = self.env.ref("uom.product_uom_unit", raise_if_not_found=False) or self.env["uom.uom"].search([], limit=1)
 
+        rate = float(data.get("rate") or data.get("opening_rate") or data.get("closing_rate") or 0.0)
+
         vals = {
             "name": name,
             "type": "consu",
             "uom_id": uom.id if uom else False,
-            "standard_price": float(data.get("opening_rate") or 0.0),
             "company_id": self.company.id,
         }
+        if rate > 0:
+            vals["standard_price"] = rate
 
         if "is_storable" in Product._fields:
             vals["is_storable"] = True
@@ -564,7 +567,83 @@ class SyncEngine:
             rec.write(vals)
         else:
             rec = Product.create(vals)
+
+        # Apply stock on-hand quantity matching Tally closing/opening balance
+        target_qty = float(data.get("quantity") or data.get("closing_balance") or data.get("opening_balance") or 0.0)
+        self._apply_stock_quantities(rec, target_qty, data.get("batch_allocations"))
+
         return rec
+
+    def _apply_stock_quantities(self, product, target_qty, batch_allocations=None):
+        """Apply physical on-hand stock quantities to Odoo stock.quant."""
+        if not product or not hasattr(product, "qty_available"):
+            return
+
+        Quant = self.env["stock.quant"]
+        Location = self.env["stock.location"]
+        Warehouse = self.env["stock.warehouse"]
+
+        wh = Warehouse.search([("company_id", "=", self.company.id)], limit=1)
+        default_loc = wh.lot_stock_id if wh and wh.lot_stock_id else Location.search([
+            ("usage", "=", "internal"),
+            ("company_id", "in", (False, self.company.id))
+        ], limit=1)
+
+        if not default_loc:
+            return
+
+        allocations = batch_allocations or []
+        if allocations:
+            for alloc in allocations:
+                g_name = alloc.get("godown") or "Main Location"
+                qty = float(alloc.get("qty") or 0.0)
+                if not qty:
+                    continue
+
+                target_loc = default_loc
+                if g_name and g_name != "Main Location":
+                    g_loc = Location.search([
+                        ("name", "=ilike", g_name),
+                        ("usage", "=", "internal"),
+                        ("company_id", "in", (False, self.company.id))
+                    ], limit=1)
+                    if not g_loc:
+                        g_loc = Location.create({
+                            "name": g_name,
+                            "location_id": default_loc.id,
+                            "usage": "internal",
+                            "company_id": self.company.id,
+                        })
+                    target_loc = g_loc
+
+                self._set_location_quant(product, target_loc, qty)
+        else:
+            if target_qty != 0.0:
+                self._set_location_quant(product, default_loc, target_qty)
+
+    def _set_location_quant(self, product, location, qty):
+        """Set or adjust stock.quant at a specific internal location."""
+        Quant = self.env["stock.quant"]
+        try:
+            quant = Quant.search([
+                ("product_id", "=", product.id),
+                ("location_id", "=", location.id),
+                ("lot_id", "=", False),
+            ], limit=1)
+
+            if quant:
+                if quant.quantity != qty:
+                    quant.with_context(inventory_mode=True).write({"inventory_quantity": qty})
+                    quant.action_apply_inventory()
+            else:
+                q = Quant.with_context(inventory_mode=True).create({
+                    "product_id": product.id,
+                    "location_id": location.id,
+                    "inventory_quantity": qty,
+                })
+                q.action_apply_inventory()
+        except Exception as e:
+            _logger.warning("Could not apply stock quant for %s at %s: %s", product.name, location.name, e)
 
     def _upsert_cost_centre(self, data):
         """Upsert account.analytic.account from Tally <COSTCENTRE>."""

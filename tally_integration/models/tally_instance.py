@@ -566,8 +566,11 @@ class TallyInstance(models.Model):
                 continue
             try:
                 from_aid = cfg.last_alterid if self.use_tdl_delta else None
+                fetch_f = None
+                if cfg.entity == "stock_item":
+                    fetch_f = "NAME,PARENT,BASEUNITS,HSNCODE,HSNDESCRIPTION,OPENINGBALANCE,OPENINGVALUE,OPENINGRATE,CLOSINGBALANCE,CLOSINGVALUE,CLOSINGRATE,BATCHALLOCATIONS.LIST"
                 xml = tally_xml_builder.build_collection_export(
-                    ctype, company_name=self.tally_company, from_alterid=from_aid)
+                    ctype, company_name=self.tally_company, from_alterid=from_aid, fetch_fields=fetch_f)
                 resp = tally_transport.post_xml(ep["url"], xml, auth=ep["auth"],
                                                 extra_headers=ep["headers"], verify=ep["verify"])
                 root = tally_xml_parser.parse_tally_xml_root(resp)

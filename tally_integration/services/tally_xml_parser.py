@@ -182,20 +182,54 @@ def parse_units_from_xml(root):
 
 
 def parse_stock_items_from_xml(root):
-    """Parse all <STOCKITEM> elements from XML."""
+    """Parse all <STOCKITEM> elements from XML with full inventory, rate, and batch/godown data."""
     items = []
     for s in root.iter("STOCKITEM"):
         name = s.attrib.get("NAME") or _clean_text(s, "NAME")
         if not name:
             continue
+
+        op_qty = _clean_float(s, "OPENINGBALANCE", 0.0)
+        cl_qty = _clean_float(s, "CLOSINGBALANCE", 0.0)
+        op_rate = _clean_float(s, "OPENINGRATE", 0.0)
+        cl_rate = _clean_float(s, "CLOSINGRATE", 0.0)
+        op_val = abs(_clean_float(s, "OPENINGVALUE", 0.0))
+        cl_val = abs(_clean_float(s, "CLOSINGVALUE", 0.0))
+
+        rate = cl_rate or op_rate
+        if not rate and op_qty and op_val:
+            rate = op_val / op_qty
+        elif not rate and cl_qty and cl_val:
+            rate = cl_val / cl_qty
+
+        on_hand_qty = cl_qty if cl_qty != 0.0 else op_qty
+
+        batch_allocations = []
+        for batch in s.iter("BATCHALLOCATIONS.LIST"):
+            godown = _clean_text(batch, "GODOWNNAME", "")
+            b_name = _clean_text(batch, "BATCHNAME", "")
+            b_qty = _clean_float(batch, "CLOSINGBALANCE", 0.0) or _clean_float(batch, "OPENINGBALANCE", 0.0) or _clean_float(batch, "ACTUALQTY", 0.0)
+            b_amt = abs(_clean_float(batch, "AMOUNT", 0.0))
+            if godown or b_qty:
+                batch_allocations.append({
+                    "godown": godown or "Main Location",
+                    "batch": b_name,
+                    "qty": b_qty,
+                    "amount": b_amt,
+                })
+
         items.append({
             "name": name,
             "parent_group": _clean_text(s, "PARENT", "Primary"),
             "base_uom": _clean_text(s, "BASEUNITS", "Nos"),
             "hsn_code": _clean_text(s, "HSNCODE", "") or _clean_text(s, "HSNDESCRIPTION", ""),
-            "opening_balance": _clean_float(s, "OPENINGBALANCE", 0.0),
-            "opening_rate": _clean_float(s, "OPENINGRATE", 0.0),
-            "opening_value": _clean_float(s, "OPENINGVALUE", 0.0),
+            "opening_balance": op_qty,
+            "closing_balance": cl_qty,
+            "quantity": on_hand_qty,
+            "rate": rate,
+            "opening_value": op_val,
+            "closing_value": cl_val,
+            "batch_allocations": batch_allocations,
             "guid": _clean_text(s, "GUID"),
             "alterid": _clean_text(s, "ALTERID"),
         })
