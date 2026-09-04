@@ -96,3 +96,22 @@ class ProductTemplate(models.Model):
             })
         except Exception as e:
             _logger.warning("Tally product enqueue skipped for product %s: %s", self.id, e)
+
+
+class ProductProduct(models.Model):
+    _inherit = "product.product"
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super().create(vals_list)
+        if not self.env.context.get("tally_no_sync"):
+            for rec in records:
+                rec.product_tmpl_id._enqueue_tally_product()
+        return records
+
+    def write(self, vals):
+        res = super().write(vals)
+        if not self.env.context.get("tally_no_sync"):
+            for rec in self:
+                rec.product_tmpl_id._enqueue_tally_product()
+        return res
