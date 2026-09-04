@@ -70,15 +70,26 @@ def parse_currencies_from_xml(root):
         name = c.attrib.get("NAME") or _clean_text(c, "NAME")
         if not name:
             continue
-        mailing_name = _clean_text(c, "MAILINGNAME") or _clean_text(c, "EXPANDEDSYMBOL") or "INR"
-        symbol = _clean_text(c, "ORIGINALNAME") or name
+        mailing_name = _clean_text(c, "MAILINGNAME") or _clean_text(c, "EXPANDEDSYMBOL") or ""
+        orig_name = _clean_text(c, "ORIGINALNAME")
+
+        # In Tally Prime, Indian Rupee symbol is stored as ASCII '?' in legacy codepages.
+        if name == "?" or orig_name == "?" or mailing_name.upper() == "INR" or "rupee" in mailing_name.lower():
+            symbol = "₹"
+            mailing_name = "INR"
+            name = "INR"
+        else:
+            symbol = orig_name or name
+            if symbol == "?":
+                symbol = mailing_name or name
+
         dec_symbol = _clean_text(c, "DECIMALSYMBOL", "paise")
         dec_places = int(_clean_float(c, "DECIMALPLACES", 2.0))
         guid = _clean_text(c, "GUID")
         alterid = _clean_text(c, "ALTERID")
         currencies.append({
             "name": name,
-            "formal_name": mailing_name,
+            "formal_name": mailing_name or ("INR" if symbol == "₹" else name),
             "symbol": symbol,
             "decimal_symbol": dec_symbol,
             "decimal_places": dec_places,

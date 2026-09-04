@@ -254,39 +254,55 @@ class SyncEngine:
         Currency = self.env["res.currency"].with_context(active_test=False)
         rec = False
 
+        KNOWN_SYMBOLS = {
+            "INR": "₹", "USD": "$", "EUR": "€", "GBP": "£",
+            "AED": "AED", "SAR": "SAR", "JPY": "¥", "CAD": "CA$",
+            "AUD": "AU$", "SGD": "S$",
+        }
+
+        # Determine ISO code
+        cur_iso = (formal if len(formal) == 3 else (name if len(name) == 3 else "")).upper()
+        if not cur_iso and (name in ("?", "Rs.", "Rs", "₹") or symbol in ("?", "Rs.", "Rs", "₹") or "inr" in formal.lower() or "rupee" in formal.lower()):
+            cur_iso = "INR"
+
         # 1. Search existing by mapping GUID
         mapping = self._get_mapping("currency", guid=data.get("guid"))
         if mapping and mapping.odoo_res_id:
             rec = Currency.browse(mapping.odoo_res_id).exists()
 
-        # 2. Search by ISO code (e.g. INR, USD) or formal name or symbol
-        search_codes = [c for c in [formal, name, symbol] if c and len(c) == 3]
-        for code in search_codes:
-            if not rec:
-                rec = Currency.search([("name", "=ilike", code)], limit=1)
+        # 2. Search by ISO code (e.g. INR, USD)
+        if not rec and cur_iso:
+            rec = Currency.search([("name", "=ilike", cur_iso)], limit=1)
 
-        if not rec and symbol:
+        if not rec and formal and len(formal) <= 5:
+            rec = Currency.search([("name", "=ilike", formal)], limit=1)
+        if not rec and symbol and symbol not in ("?", "\ufffd"):
             rec = Currency.search([("symbol", "=", symbol)], limit=1)
-        if not rec and name:
-            rec = Currency.search([("name", "=ilike", name)], limit=1)
 
         dec_places = int(data.get("decimal_places") or 2)
         rounding = 1.0 / (10 ** dec_places)
-        cur_symbol = symbol or (name if len(name) <= 4 else (formal[:3] if formal else "₹"))
+
+        if cur_iso == "INR" or symbol in ("?", "Rs.", "Rs", "₹") or name in ("?", "Rs.", "Rs", "₹"):
+            cur_symbol = "₹"
+            if not cur_iso:
+                cur_iso = "INR"
+        else:
+            cur_symbol = symbol or KNOWN_SYMBOLS.get(cur_iso) or (formal[:3] if formal else cur_iso)
+            if cur_symbol in ("?", "\ufffd", ""):
+                cur_symbol = KNOWN_SYMBOLS.get(cur_iso, cur_iso or "₹")
 
         vals = {
             "active": True,
             "rounding": rounding,
             "decimal_places": dec_places,
         }
-        if cur_symbol and len(cur_symbol) <= 4:
+        if cur_symbol and cur_symbol not in ("?", "\ufffd"):
             vals["symbol"] = cur_symbol
 
         if rec:
             rec.write(vals)
         else:
-            cur_name = (formal if len(formal) == 3 else (name if len(name) == 3 else "INR")).upper()
-            vals["name"] = cur_name
+            vals["name"] = cur_iso or (formal if len(formal) == 3 else name[:3].upper())
             vals["currency_unit_label"] = formal or name or "Rupees"
             vals["currency_subunit_label"] = data.get("decimal_symbol") or "Paise"
             rec = Currency.create(vals)
@@ -468,6 +484,8 @@ class SyncEngine:
             vals["l10n_in_gst_treatment"] = treatment
 
         if rec:
+            if rec.is_company and (rec == self.company.partner_id or rec in self.env["res.company"].sudo().search([]).mapped("partner_id")):
+                vals.pop("company_id", None)
             rec.write(vals)
         else:
             rec = Partner.create(vals)
