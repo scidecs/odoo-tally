@@ -539,6 +539,7 @@ class TallyInstance(models.Model):
         from ..services import tally_transport, tally_xml_builder, tally_xml_parser
         from ..services.sync_engine import SyncEngine
         parser_map = {
+            "currency": tally_xml_parser.parse_currencies_from_xml,
             "group": tally_xml_parser.parse_groups_from_xml,
             "account_ledger": tally_xml_parser.parse_ledgers_from_xml,
             "ledger": tally_xml_parser.parse_ledgers_from_xml,
@@ -623,6 +624,76 @@ class TallyInstance(models.Model):
         self.last_pull = fields.Datetime.now()
         return self._pull_notification(pulled)
 
+    def action_setup_indian_localization(self):
+        """Install and configure Indian Localization (l10n_in) and INR currency for this company."""
+        self.ensure_one()
+        company = self.company_id or self.env.company
+        country_in = self.env["res.country"].search([("code", "=", "IN")], limit=1)
+
+        # 1. Activate INR Currency
+        Currency = self.env["res.currency"].with_context(active_test=False)
+        inr_currency = Currency.search([("name", "=", "INR")], limit=1)
+        if inr_currency:
+            inr_currency.write({
+                "active": True,
+                "symbol": "₹",
+                "currency_unit_label": "Rupees",
+                "currency_subunit_label": "Paise",
+                "rounding": 0.01,
+                "decimal_places": 2,
+            })
+        else:
+            inr_currency = Currency.create({
+                "name": "INR",
+                "symbol": "₹",
+                "currency_unit_label": "Rupees",
+                "currency_subunit_label": "Paise",
+                "rounding": 0.01,
+                "decimal_places": 2,
+                "active": True,
+            })
+
+        # 2. Update company country & currency
+        comp_vals = {}
+        if country_in and company.country_id != country_in:
+            comp_vals["country_id"] = country_in.id
+        if company.currency_id != inr_currency:
+            has_moves = self.env["account.move"].search_count([("company_id", "=", company.id), ("state", "=", "posted")])
+            if not has_moves:
+                comp_vals["currency_id"] = inr_currency.id
+
+        if comp_vals:
+            company.write(comp_vals)
+
+        # 3. Check / Install l10n_in module
+        l10n_in_mod = self.env["ir.module.module"].search([("name", "=", "l10n_in")], limit=1)
+        installed_l10n = False
+        if l10n_in_mod and l10n_in_mod.state != "installed":
+            try:
+                l10n_in_mod.button_immediate_install()
+                installed_l10n = True
+            except Exception as e:
+                self.env["tally.sync.log"].log(
+                    self, False, False, "warning",
+                    _("Could not auto-install l10n_in module: %s") % e)
+
+        msg = _("Indian Localization configured · Company: %s · Currency: INR (₹) · Country: India%s") % (
+            company.name, " · l10n_in module installed" if installed_l10n else ""
+        )
+        self.env["tally.sync.log"].log(self, False, False, "success", msg)
+        self.message_post(body=msg)
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Indian Localization Configured"),
+                "message": msg,
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
     def _reconcile_tally_deletions(self, entities=None):
         """Reconciliation: Identify and flag records deleted directly in Tally.
 
@@ -636,9 +707,10 @@ class TallyInstance(models.Model):
         from ..services import tally_transport, tally_xml_builder, tally_xml_parser
 
         if not entities:
-            entities = ["ledger", "group", "stock_item", "uom", "cost_centre"]
+            entities = ["currency", "ledger", "group", "stock_item", "uom", "cost_centre"]
 
         type_collection_map = {
+            "currency": ("Currency", "NAME,GUID,MASTERID,MAILINGNAME"),
             "ledger": ("Ledger", "NAME,GUID,MASTERID"),
             "group": ("Group", "NAME,GUID,MASTERID"),
             "stock_item": ("StockItem", "NAME,GUID,MASTERID"),

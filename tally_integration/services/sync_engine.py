@@ -109,6 +109,7 @@ class SyncEngine:
         max_alterid = 0
 
         handler_map = {
+            "currency": self._upsert_currency,
             "group": self._upsert_group,
             "account_ledger": self._upsert_account_ledger,
             "ledger": self._upsert_party_ledger,
@@ -242,6 +243,56 @@ class SyncEngine:
     # MASTER UPSERT HANDLERS
     # =========================================================================
 
+    def _upsert_currency(self, data):
+        """Upsert res.currency from Tally <CURRENCY>."""
+        name = data.get("name") or ""
+        formal = data.get("formal_name") or ""
+        symbol = data.get("symbol") or ""
+        if not name and not formal and not symbol:
+            return False
+
+        Currency = self.env["res.currency"].with_context(active_test=False)
+        rec = False
+
+        # 1. Search existing by mapping GUID
+        mapping = self._get_mapping("currency", guid=data.get("guid"))
+        if mapping and mapping.odoo_res_id:
+            rec = Currency.browse(mapping.odoo_res_id).exists()
+
+        # 2. Search by ISO code (e.g. INR, USD) or formal name or symbol
+        search_codes = [c for c in [formal, name, symbol] if c and len(c) == 3]
+        for code in search_codes:
+            if not rec:
+                rec = Currency.search([("name", "=ilike", code)], limit=1)
+
+        if not rec and symbol:
+            rec = Currency.search([("symbol", "=", symbol)], limit=1)
+        if not rec and name:
+            rec = Currency.search([("name", "=ilike", name)], limit=1)
+
+        dec_places = int(data.get("decimal_places") or 2)
+        rounding = 1.0 / (10 ** dec_places)
+        cur_symbol = symbol or (name if len(name) <= 4 else (formal[:3] if formal else "₹"))
+
+        vals = {
+            "active": True,
+            "rounding": rounding,
+            "decimal_places": dec_places,
+        }
+        if cur_symbol and len(cur_symbol) <= 4:
+            vals["symbol"] = cur_symbol
+
+        if rec:
+            rec.write(vals)
+        else:
+            cur_name = (formal if len(formal) == 3 else (name if len(name) == 3 else "INR")).upper()
+            vals["name"] = cur_name
+            vals["currency_unit_label"] = formal or name or "Rupees"
+            vals["currency_subunit_label"] = data.get("decimal_symbol") or "Paise"
+            rec = Currency.create(vals)
+
+        return rec
+
     def _upsert_group(self, data):
         """Upsert account.group from Tally <GROUP>."""
         name = data.get("name")
@@ -312,7 +363,7 @@ class SyncEngine:
         return rec
 
     def _upsert_party_ledger(self, data):
-        """Upsert res.partner from Tally Party Ledger (Debtors/Creditors)."""
+        """Upsert res.partner from Tally Party Ledger (Debtors/Creditors) with full Indian localization."""
         name = data.get("name")
         if not name:
             return False
@@ -325,10 +376,10 @@ class SyncEngine:
             rec = Partner.browse(mapping.odoo_res_id).exists()
 
         # 2. Search by GSTIN (VAT) or Name
-        gstin = data.get("gstin")
+        gstin = (data.get("gstin") or "").strip()
         domain = [("company_id", "in", (False, self.company.id))]
         if not rec and gstin:
-            rec = Partner.search(domain + [("vat", "=", gstin)], limit=1)
+            rec = Partner.search(domain + ["|", ("vat", "=", gstin), ("vat", "=ilike", gstin)], limit=1)
         if not rec:
             rec = Partner.search(domain + [("name", "=ilike", name)], limit=1)
 
@@ -336,14 +387,36 @@ class SyncEngine:
         is_customer = "debtor" in parent.lower() or "customer" in parent.lower()
         is_supplier = "creditor" in parent.lower() or "vendor" in parent.lower() or "supplier" in parent.lower()
 
-        # State lookup
+        # Extract PAN (from field or chars 3-12 of 15-char GSTIN)
+        pan = (data.get("pan") or "").strip()
+        if not pan and gstin and len(gstin) == 15:
+            pan = gstin[2:12].upper()
+
+        # State lookup by name, code or GSTIN state code (first 2 digits)
         state_id = False
-        if data.get("state"):
-            state = self.env["res.country.state"].search([
-                ("name", "ilike", data["state"]),
-                ("country_id.code", "=", "IN")
+        st_name = (data.get("state") or "").strip()
+        if not st_name and gstin and len(gstin) >= 2 and gstin[:2].isdigit():
+            gst_code = gstin[:2]
+            if "l10n_in_tin" in self.env["res.country.state"]._fields:
+                st = self.env["res.country.state"].search([
+                    ("l10n_in_tin", "=", gst_code),
+                    ("country_id.code", "=", "IN")
+                ], limit=1)
+                if st:
+                    state_id = st.id
+        if not state_id and st_name:
+            import re
+            clean_st = re.sub(r"^\d+\s*[-:]\s*", "", st_name).strip()
+            st = self.env["res.country.state"].search([
+                ("country_id.code", "=", "IN"),
+                "|", ("name", "=ilike", clean_st), ("code", "=ilike", clean_st)
             ], limit=1)
-            state_id = state.id if state else False
+            if not st:
+                st = self.env["res.country.state"].search([
+                    ("country_id.code", "=", "IN"),
+                    ("name", "ilike", clean_st)
+                ], limit=1)
+            state_id = st.id if st else False
 
         country_id = self.env["res.country"].search([("code", "=", "IN")], limit=1).id
 
@@ -369,6 +442,30 @@ class SyncEngine:
             "customer_rank": 1 if is_customer else 0,
             "supplier_rank": 1 if is_supplier else 0,
         }
+
+        # Indian Localization fields (l10n_in)
+        if "l10n_in_gstin" in Partner._fields and gstin:
+            vals["l10n_in_gstin"] = gstin
+        if "l10n_in_pan" in Partner._fields and pan:
+            vals["l10n_in_pan"] = pan
+        if "l10n_in_gst_treatment" in Partner._fields:
+            gst_reg = (data.get("gst_registration_type") or "").lower().strip()
+            treat_map = {
+                "regular": "regular",
+                "composition": "composition",
+                "unregistered": "unregistered",
+                "consumer": "consumer",
+                "overseas": "overseas",
+                "special economic zone": "special_economic_zone",
+                "sez": "special_economic_zone",
+                "deemed export": "deemed_export",
+            }
+            treatment = treat_map.get(gst_reg)
+            if not treatment and gstin:
+                treatment = "regular"
+            elif not treatment:
+                treatment = "unregistered"
+            vals["l10n_in_gst_treatment"] = treatment
 
         if rec:
             rec.write(vals)
@@ -499,21 +596,32 @@ class SyncEngine:
         return rec
 
     def _upsert_tax(self, data):
-        """Upsert account.tax from Tally Tax Ledger."""
+        """Upsert account.tax from Tally Tax Ledger (GST, TDS, TCS, etc.)."""
         name = data.get("name")
-        rate = float(data.get("rate_of_tax") or 0.0)
         if not name:
             return False
+        rate = float(data.get("rate_of_tax") or 0.0)
+        if not rate:
+            import re
+            m = re.search(r"(\d+(?:\.\d+)?)\s*%", name)
+            if m:
+                rate = float(m.group(1))
+
+        parent = (data.get("parent") or "").lower()
+        tname_lower = name.lower()
+        tax_type = "purchase" if any(k in parent or k in tname_lower for k in ("purchase", "inward", "creditor", "input")) else "sale"
+
         Tax = self.env["account.tax"]
         rec = Tax.search([
-            ("name", "=", name),
+            ("name", "=ilike", name),
             ("company_id", "=", self.company.id)
         ], limit=1)
+
         vals = {
             "name": name,
             "amount": rate,
             "amount_type": "percent",
-            "type_tax_use": "sale",
+            "type_tax_use": tax_type,
             "company_id": self.company.id,
         }
         if rec:
@@ -543,7 +651,7 @@ class SyncEngine:
         return self._upsert_invoice_move(data, move_type="in_refund")
 
     def _find_or_create_tax(self, tax_name, rate=0.0, tax_type="sale"):
-        """Find or create matching account.tax in Odoo."""
+        """Find or create matching account.tax in Odoo with Indian GST & TDS support."""
         Tax = self.env["account.tax"]
         tax = Tax.search([
             ("name", "=ilike", tax_name),
@@ -554,13 +662,29 @@ class SyncEngine:
             import re
             m = re.search(r"(\d+(?:\.\d+)?)\s*%", tax_name)
             calc_rate = float(m.group(1)) if m else rate
+            tname_lower = tax_name.lower()
+
             if calc_rate > 0:
-                tax = Tax.search([
+                domain = [
                     ("amount", "=", calc_rate),
                     ("amount_type", "=", "percent"),
                     ("type_tax_use", "=", tax_type),
                     ("company_id", "=", self.company.id),
-                ], limit=1)
+                ]
+                if "cgst" in tname_lower:
+                    tax = Tax.search(domain + [("name", "ilike", "cgst")], limit=1)
+                elif "sgst" in tname_lower or "utgst" in tname_lower:
+                    tax = Tax.search(domain + [("name", "ilike", "sgst")], limit=1)
+                elif "igst" in tname_lower:
+                    tax = Tax.search(domain + [("name", "ilike", "igst")], limit=1)
+                elif "tds" in tname_lower:
+                    tax = Tax.search(domain + [("name", "ilike", "tds")], limit=1)
+                elif "tcs" in tname_lower:
+                    tax = Tax.search(domain + [("name", "ilike", "tcs")], limit=1)
+
+                if not tax:
+                    tax = Tax.search(domain, limit=1)
+
             if not tax:
                 tax = Tax.create({
                     "name": tax_name,
@@ -572,7 +696,7 @@ class SyncEngine:
         return tax
 
     def _upsert_invoice_move(self, data, move_type="out_invoice"):
-        """Generic handler for customer and vendor invoices/refunds with GST tax mapping."""
+        """Generic handler for customer and vendor invoices/refunds with Indian GST, E-Way & IRN mapping."""
         Move = self.env["account.move"]
         vch_num = data.get("voucher_number")
         date_str = data.get("date")
@@ -608,7 +732,7 @@ class SyncEngine:
             if led == partner_name:
                 continue
             led_lower = led.lower()
-            if any(k in led_lower for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "duties")):
+            if any(k in led_lower for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "duties", "tds", "tcs")):
                 tax_rec = self._find_or_create_tax(led, tax_type=tax_type)
                 if tax_rec and tax_rec.id not in tax_ids:
                     tax_ids.append(tax_rec.id)
@@ -643,7 +767,7 @@ class SyncEngine:
             # Fallback to ledger entries if pure accounting invoice
             for le in data.get("ledger_entries", []):
                 led = le.get("ledger", "")
-                if led != partner_name and not any(k in led.lower() for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "duties")):
+                if led != partner_name and not any(k in led.lower() for k in ("cgst", "sgst", "igst", "gst", "tax", "vat", "duties", "tds", "tcs")):
                     account = self._get_or_create_account(led, default_type=default_acc_type)
                     line_vals = {
                         "name": led or "Line",
@@ -662,16 +786,32 @@ class SyncEngine:
         journal_type = "sale" if move_type in ("out_invoice", "out_refund") else "purchase"
         journal = self._get_or_create_journal(journal_type)
 
+        narration_parts = []
+        if data.get("narration"):
+            narration_parts.append(f"<p>{data['narration']}</p>")
+        if data.get("eway_bill_no"):
+            narration_parts.append(f"<p><b>E-Way Bill:</b> {data['eway_bill_no']} ({data.get('vehicle_no') or 'N/A'})</p>")
+        if data.get("irn"):
+            narration_parts.append(f"<p><b>IRN:</b> {data['irn']} (Ack: {data.get('ack_no') or 'N/A'})</p>")
+
         vals = {
             "move_type": move_type,
             "partner_id": partner.id if partner else False,
             "invoice_date": date_str,
             "date": date_str,
             "ref": data.get("reference") or vch_num,
-            "narration": f"<p>{data['narration']}</p>" if data.get("narration") else False,
+            "narration": "".join(narration_parts) if narration_parts else False,
             "company_id": self.company.id,
             "journal_id": journal.id if journal else False,
         }
+
+        # Indian Localization fields on Move
+        if "l10n_in_state_id" in Move._fields and partner and partner.state_id:
+            vals["l10n_in_state_id"] = partner.state_id.id
+        if "l10n_in_gst_treatment" in Move._fields and partner and getattr(partner, "l10n_in_gst_treatment", False):
+            vals["l10n_in_gst_treatment"] = partner.l10n_in_gst_treatment
+        if data.get("eway_bill_no") and "l10n_in_ewaybill_number" in Move._fields:
+            vals["l10n_in_ewaybill_number"] = data["eway_bill_no"]
 
         if move:
             if move.state == "draft":

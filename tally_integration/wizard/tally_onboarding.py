@@ -22,6 +22,9 @@ class TallyOnboarding(models.TransientModel):
     sync_opening_balance = fields.Boolean(string="Opening Balances", default=True)
     sync_history = fields.Boolean(string="Historical Vouchers", default=False)
     history_from = fields.Date(string="History From")
+    configure_indian_localization = fields.Boolean(
+        string="Configure Indian Localization & INR", default=True,
+        help="Sets company currency to INR (₹), sets country to India, and activates Indian GST/TDS localization.")
     reset_watermarks = fields.Boolean(
         string="Force Full Pull", default=True,
         help="Reset AlterID watermarks so the next poll re-exports everything.")
@@ -29,6 +32,8 @@ class TallyOnboarding(models.TransientModel):
     def action_start(self):
         self.ensure_one()
         instance = self.instance_id
+        if self.configure_indian_localization:
+            instance.action_setup_indian_localization()
         instance.write({
             "coa_mode": self.coa_mode,
             "history_from": self.history_from,

@@ -24,6 +24,7 @@
                             <field name="sync_history"/>
                             <field name="history_from" invisible="not sync_history"
                                    required="sync_history"/>
+                            <field name="configure_indian_localization"/>
                             <field name="reset_watermarks"/>
                         </group>
                     </group>

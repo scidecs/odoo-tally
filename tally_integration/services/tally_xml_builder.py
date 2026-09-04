@@ -398,12 +398,31 @@ def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
 </TALLYMESSAGE>"""
 
 
+def build_currency_xml(name, symbol="₹", formal_name="INR", decimal_symbol="paise",
+                       decimal_places=2, guid=None):
+    """Build <CURRENCY> XML."""
+    guid_tag = f'<GUID>{xml_escape(guid)}</GUID>' if guid else ''
+    cur_name = name or symbol or formal_name or "INR"
+    return f"""<TALLYMESSAGE xmlns:UDF="TallyUDF">
+  <CURRENCY NAME="{xml_escape(cur_name)}" ACTION="Create">
+    {guid_tag}
+    <NAME>{xml_escape(cur_name)}</NAME>
+    <MAILINGNAME>{xml_escape(formal_name or cur_name)}</MAILINGNAME>
+    <ORIGINALNAME>{xml_escape(symbol or cur_name)}</ORIGINALNAME>
+    <EXPANDEDSYMBOL>{xml_escape(formal_name or cur_name)}</EXPANDEDSYMBOL>
+    <DECIMALSYMBOL>{xml_escape(decimal_symbol or 'paise')}</DECIMALSYMBOL>
+    <DECIMALPLACES>{int(decimal_places or 2)}</DECIMALPLACES>
+  </CURRENCY>
+</TALLYMESSAGE>"""
+
+
 # ==============================================================================
 # EXPORT REQUESTS (direct-mode master pull)
 # ==============================================================================
 
 # entity -> native Tally collection object name
 COLLECTION_MAP = {
+    "currency": "Currency",
     "group": "Group",
     "account_ledger": "Ledger",
     "ledger": "Ledger",

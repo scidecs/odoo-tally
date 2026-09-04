@@ -63,6 +63,31 @@ def parse_tally_xml_root(xml_content):
         return ET.fromstring(clean_xml)
 
 
+def parse_currencies_from_xml(root):
+    """Parse all <CURRENCY> elements from XML."""
+    currencies = []
+    for c in root.iter("CURRENCY"):
+        name = c.attrib.get("NAME") or _clean_text(c, "NAME")
+        if not name:
+            continue
+        mailing_name = _clean_text(c, "MAILINGNAME") or _clean_text(c, "EXPANDEDSYMBOL") or "INR"
+        symbol = _clean_text(c, "ORIGINALNAME") or name
+        dec_symbol = _clean_text(c, "DECIMALSYMBOL", "paise")
+        dec_places = int(_clean_float(c, "DECIMALPLACES", 2.0))
+        guid = _clean_text(c, "GUID")
+        alterid = _clean_text(c, "ALTERID")
+        currencies.append({
+            "name": name,
+            "formal_name": mailing_name,
+            "symbol": symbol,
+            "decimal_symbol": dec_symbol,
+            "decimal_places": dec_places,
+            "guid": guid,
+            "alterid": alterid,
+        })
+    return currencies
+
+
 def parse_groups_from_xml(root):
     """Parse all <GROUP> elements from XML."""
     groups = []
@@ -95,25 +120,34 @@ def parse_ledgers_from_xml(root):
             if addr.text and addr.text.strip():
                 addresses.append(addr.text.strip())
 
+        gstin = _clean_text(l, "PARTYGSTIN", "") or _clean_text(l, "GSTIN", "")
+        pan = (_clean_text(l, "INCOMETAXNUMBER", "") or _clean_text(l, "PANNUMBER", "")
+               or _clean_text(l, "PAN", ""))
+
         ledgers.append({
             "name": name,
             "parent": parent,
             "guid": _clean_text(l, "GUID"),
             "alterid": _clean_text(l, "ALTERID"),
             "opening_balance": _clean_float(l, "OPENINGBALANCE", 0.0),
-            "gstin": _clean_text(l, "PARTYGSTIN", ""),
-            "pan": _clean_text(l, "INCOMETAXNUMBER", ""),
-            "state": _clean_text(l, "STATENAME", ""),
+            "gstin": gstin,
+            "pan": pan,
+            "state": _clean_text(l, "STATENAME", "") or _clean_text(l, "STATE", ""),
             "country": _clean_text(l, "COUNTRYNAME", "India"),
             "pincode": _clean_text(l, "PINCODE", ""),
             "email": _clean_text(l, "EMAIL", ""),
             "phone": _clean_text(l, "LEDGERPHONE", "") or _clean_text(l, "LEDGERMOBILE", ""),
             "credit_limit": _clean_float(l, "CREDITLIMIT", 0.0),
             "addresses": addresses,
+            "gst_registration_type": _clean_text(l, "GSTREGISTRATIONTYPE", ""),
             "tax_type": _clean_text(l, "TAXTYPE", ""),
             "gst_duty_head": _clean_text(l, "GSTDUTYHEAD", ""),
             "rate_of_tax": _clean_float(l, "RATEOFTAXCALCULATION", 0.0),
             "is_billwise": _clean_text(l, "ISBILLWISEON", "No").lower() in ("yes", "true", "1"),
+            "is_tds_applicable": _clean_text(l, "ISTDSAPPLICABLE", "No").lower() in ("yes", "true", "1"),
+            "is_tcs_applicable": _clean_text(l, "ISTCSAPPLICABLE", "No").lower() in ("yes", "true", "1"),
+            "tds_section": _clean_text(l, "TDSSECTION", ""),
+            "tcs_section": _clean_text(l, "TCSSECTION", ""),
         })
     return ledgers
 
@@ -258,6 +292,29 @@ def parse_vouchers_from_xml(root):
                 "godown": godown,
             })
 
+        # E-Way Bill details
+        eway_elem = v.find(".//EWAYBILLDETAILS.LIST")
+        if eway_elem is None:
+            eway_elem = v.find(".//EWAYBILLDETAILS")
+        eway_bill_no = _clean_text(eway_elem, "EWAYBILLNO") if eway_elem is not None else _clean_text(v, "EWAYBILLNO")
+        eway_bill_date = _parse_tally_date(_clean_text(eway_elem, "EWAYBILLDATE") if eway_elem is not None else "")
+        vehicle_no = _clean_text(eway_elem, "VEHICLENO") if eway_elem is not None else _clean_text(v, "VEHICLENO")
+        distance = _clean_float(eway_elem, "TRANSPORTDISTANCE") if eway_elem is not None else _clean_float(v, "TRANSPORTDISTANCE")
+        transporter_name = _clean_text(eway_elem, "TRANSPORTERNAME") if eway_elem is not None else _clean_text(v, "TRANSPORTERNAME")
+        transporter_id = _clean_text(eway_elem, "TRANSPORTERID") if eway_elem is not None else _clean_text(v, "TRANSPORTERID")
+
+        # E-Invoice / IRN details
+        irn_elem = v.find(".//IRNDETAILS.LIST")
+        if irn_elem is None:
+            irn_elem = v.find(".//IRNDETAILS")
+        irn = _clean_text(irn_elem, "IRN") if irn_elem is not None else _clean_text(v, "IRN")
+        ack_no = _clean_text(irn_elem, "ACKNO") if irn_elem is not None else _clean_text(v, "ACKNO")
+        ack_date = _clean_text(irn_elem, "ACKDATE") if irn_elem is not None else _clean_text(v, "ACKDATE")
+        qrcode = _clean_text(irn_elem, "QRCODE") if irn_elem is not None else _clean_text(v, "SIGNEDQRCODE")
+
+        # Place of supply / State
+        place_of_supply = _clean_text(v, "PLACEOFSUPPLY") or _clean_text(v, "STATENAME")
+
         vouchers.append({
             "voucher_type": vch_type,
             "voucher_number": vch_num,
@@ -269,5 +326,16 @@ def parse_vouchers_from_xml(root):
             "narration": narration,
             "ledger_entries": ledger_entries,
             "inventory_entries": inventory_entries,
+            "eway_bill_no": eway_bill_no,
+            "eway_bill_date": eway_bill_date,
+            "vehicle_no": vehicle_no,
+            "distance": distance,
+            "transporter_name": transporter_name,
+            "transporter_id": transporter_id,
+            "irn": irn,
+            "ack_no": ack_no,
+            "ack_date": ack_date,
+            "qrcode": qrcode,
+            "place_of_supply": place_of_supply,
         })
     return vouchers
