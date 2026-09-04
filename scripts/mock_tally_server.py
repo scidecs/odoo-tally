@@ -1,149 +1,251 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Mock TallyPrime XML Gateway Server for local testing and CI/CD.
+"""Stateful Mock TallyPrime XML Gateway Server for local testing and disaster recovery simulation.
 
-Listens on HTTP port 9000 and responds to Tally XML export/import envelopes just like
-a real TallyPrime instance.
+Listens on HTTP port 9000 (or custom port) and responds to Tally XML export/import envelopes.
+Dynamically stores imported masters and vouchers in memory so that subsequent export requests
+return the exact data that was pushed to it, enabling full disaster recovery testing.
 """
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import logging
+import re
 import sys
+import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape as xml_escape
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [MockTally] %(message)s")
 logger = logging.getLogger("MockTally")
 
 
-DUMMY_GROUPS_XML = """<ENVELOPE>
+class TallyStore:
+    def __init__(self):
+        self.companies = ["Scidecs Demo Pvt Ltd", "Scidecs Demo Ltd", "Acme Trading Corp"]
+        self.groups = {}
+        self.ledgers = {}
+        self.units = {
+            "Nos": {"name": "Nos", "originalname": "Numbers", "decimal_places": 0, "guid": "uom-nos-001"},
+            "Units": {"name": "Units", "originalname": "Units", "decimal_places": 0, "guid": "uom-units-001"},
+            "Mtr": {"name": "Mtr", "originalname": "Meters", "decimal_places": 2, "guid": "uom-mtr-001"},
+        }
+        self.stock_groups = {}
+        self.stock_items = {}
+        self.godowns = {}
+        self.cost_centres = {}
+        self.vouchers = {}
+        self._init_defaults()
+
+    def _init_defaults(self):
+        default_groups = [
+            ("Sundry Debtors", "Current Assets"),
+            ("Sundry Creditors", "Current Liabilities"),
+            ("Bank Accounts", "Current Assets"),
+            ("Sales Accounts", "Direct Incomes"),
+            ("Purchase Accounts", "Direct Expenses"),
+            ("Indirect Expenses", "Primary"),
+            ("Direct Expenses", "Primary"),
+            ("Direct Incomes", "Primary"),
+            ("Indirect Incomes", "Primary"),
+            ("Duties & Taxes", "Current Liabilities"),
+        ]
+        for name, parent in default_groups:
+            self.groups[name] = {"name": name, "parent": parent, "guid": f"grp-{name.lower().replace(' ', '-')}"}
+
+        default_ledgers = [
+            {"name": "HDFC Bank Current A/c", "parent": "Bank Accounts", "guid": "led-bank-hdfc"},
+            {"name": "Cash", "parent": "Cash-in-Hand", "guid": "led-cash-001"},
+            {"name": "Sales Account", "parent": "Sales Accounts", "guid": "led-sales-001"},
+            {"name": "Purchase Account", "parent": "Purchase Accounts", "guid": "led-purch-001"},
+            {"name": "CGST @ 9%", "parent": "Duties & Taxes", "tax_type": "GST", "head": "CGST", "rate": 9.0, "guid": "led-cgst-9"},
+            {"name": "SGST @ 9%", "parent": "Duties & Taxes", "tax_type": "GST", "head": "SGST", "rate": 9.0, "guid": "led-sgst-9"},
+            {"name": "IGST @ 18%", "parent": "Duties & Taxes", "tax_type": "GST", "head": "IGST", "rate": 18.0, "guid": "led-igst-18"},
+        ]
+        for l in default_ledgers:
+            self.ledgers[l["name"]] = l
+
+    def import_xml(self, xml_text):
+        created = 0
+        altered = 0
+        messages = re.findall(r"(<TALLYMESSAGE[\s\S]*?</TALLYMESSAGE>)", xml_text or "")
+        if not messages and "<VOUCHER" in xml_text:
+            messages = [xml_text]
+
+        for msg in messages:
+            # Stock Group
+            m = re.search(r"<STOCKGROUP\s+NAME=\"([^\"]+)\"[\s\S]*?</STOCKGROUP>", msg)
+            if m:
+                name = m.group(1)
+                guid_m = re.search(r"<GUID>(.*?)</GUID>", msg)
+                parent_m = re.search(r"<PARENT>(.*?)</PARENT>", msg)
+                self.stock_groups[name] = {
+                    "name": name,
+                    "parent": parent_m.group(1) if parent_m else "Primary",
+                    "guid": guid_m.group(1) if guid_m else f"stkgrp-{len(self.stock_groups)+1}",
+                    "xml": msg,
+                }
+                created += 1
+                continue
+
+            # Stock Item
+            m = re.search(r"<STOCKITEM\s+NAME=\"([^\"]+)\"[\s\S]*?</STOCKITEM>", msg)
+            if m:
+                name = m.group(1)
+                guid_m = re.search(r"<GUID>(.*?)</GUID>", msg)
+                parent_m = re.search(r"<PARENT>(.*?)</PARENT>", msg)
+                uom_m = re.search(r"<BASEUNITS>(.*?)</BASEUNITS>", msg)
+                hsn_m = re.search(r"<HSNCODE>(.*?)</HSNCODE>", msg)
+                self.stock_items[name] = {
+                    "name": name,
+                    "parent": parent_m.group(1) if parent_m else "Primary",
+                    "base_uom": uom_m.group(1) if uom_m else "Nos",
+                    "hsn": hsn_m.group(1) if hsn_m else "",
+                    "guid": guid_m.group(1) if guid_m else f"item-{len(self.stock_items)+1}",
+                    "xml": msg,
+                }
+                created += 1
+                continue
+
+            # Unit
+            m = re.search(r"<UNIT\s+NAME=\"([^\"]+)\"[\s\S]*?</UNIT>", msg)
+            if m:
+                name = m.group(1)
+                guid_m = re.search(r"<GUID>(.*?)</GUID>", msg)
+                self.units[name] = {
+                    "name": name,
+                    "originalname": name,
+                    "guid": guid_m.group(1) if guid_m else f"uom-{len(self.units)+1}",
+                }
+                created += 1
+                continue
+
+            # Godown
+            m = re.search(r"<GODOWN\s+NAME=\"([^\"]+)\"[\s\S]*?</GODOWN>", msg)
+            if m:
+                name = m.group(1)
+                guid_m = re.search(r"<GUID>(.*?)</GUID>", msg)
+                parent_m = re.search(r"<PARENT>(.*?)</PARENT>", msg)
+                self.godowns[name] = {
+                    "name": name,
+                    "parent": parent_m.group(1) if parent_m else "Primary",
+                    "guid": guid_m.group(1) if guid_m else f"gdn-{len(self.godowns)+1}",
+                }
+                created += 1
+                continue
+
+            # Ledger
+            m = re.search(r"<LEDGER\s+NAME=\"([^\"]+)\"[\s\S]*?</LEDGER>", msg)
+            if m:
+                name = m.group(1)
+                guid_m = re.search(r"<GUID>(.*?)</GUID>", msg)
+                parent_m = re.search(r"<PARENT>(.*?)</PARENT>", msg)
+                gstin_m = re.search(r"<PARTYGSTIN>(.*?)</PARTYGSTIN>", msg)
+                self.ledgers[name] = {
+                    "name": name,
+                    "parent": parent_m.group(1) if parent_m else "Sundry Debtors",
+                    "gstin": gstin_m.group(1) if gstin_m else "",
+                    "guid": guid_m.group(1) if guid_m else f"led-{len(self.ledgers)+1}",
+                    "xml": msg,
+                }
+                created += 1
+                continue
+
+            # Voucher
+            m = re.search(r"<VOUCHER[\s\S]*?</VOUCHER>", msg)
+            if m:
+                vch_xml = m.group(0)
+                guid_m = re.search(r"<GUID>(.*?)</GUID>", vch_xml)
+                vno_m = re.search(r"<VOUCHERNUMBER>(.*?)</VOUCHERNUMBER>", vch_xml)
+                guid = guid_m.group(1) if guid_m else f"vch-{len(self.vouchers)+1}"
+                self.vouchers[guid] = {
+                    "guid": guid,
+                    "number": vno_m.group(1) if vno_m else guid,
+                    "xml": vch_xml,
+                }
+                created += 1
+                continue
+
+        if created == 0 and len(messages) > 0:
+            created = len(messages)
+        return max(1, created)
+
+    def export_companies_xml(self):
+        items = "\n".join(f'<COMPANY NAME="{xml_escape(c)}"><NAME>{xml_escape(c)}</NAME><STARTINGFROM>20260401</STARTINGFROM></COMPANY>' for c in self.companies)
+        return f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER>
-  <BODY><DATA><COLLECTION>
-    <GROUP NAME="Sundry Debtors"><NAME>Sundry Debtors</NAME><PARENT>Current Assets</PARENT><GUID>grp-debtors-001</GUID><ALTERID>10</ALTERID></GROUP>
-    <GROUP NAME="Sundry Creditors"><NAME>Sundry Creditors</NAME><PARENT>Current Liabilities</PARENT><GUID>grp-creditors-001</GUID><ALTERID>11</ALTERID></GROUP>
-    <GROUP NAME="Bank Accounts"><NAME>Bank Accounts</NAME><PARENT>Current Assets</PARENT><GUID>grp-bank-001</GUID><ALTERID>12</ALTERID></GROUP>
-    <GROUP NAME="Sales Accounts"><NAME>Sales Accounts</NAME><PARENT>Direct Incomes</PARENT><GUID>grp-sales-001</GUID><ALTERID>13</ALTERID></GROUP>
-    <GROUP NAME="Purchase Accounts"><NAME>Purchase Accounts</NAME><PARENT>Direct Expenses</PARENT><GUID>grp-purch-001</GUID><ALTERID>14</ALTERID></GROUP>
-  </COLLECTION></DATA></BODY>
+  <BODY><DATA><COLLECTION>{items}</COLLECTION></DATA></BODY>
 </ENVELOPE>"""
 
-DUMMY_LEDGERS_XML = """<ENVELOPE>
+    def export_groups_xml(self):
+        items = "\n".join(f'<GROUP NAME="{xml_escape(g["name"])}"><NAME>{xml_escape(g["name"])}</NAME><PARENT>{xml_escape(g.get("parent","Primary"))}</PARENT><GUID>{xml_escape(g.get("guid",""))}</GUID><ALTERID>100</ALTERID></GROUP>' for g in self.groups.values())
+        return f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER>
-  <BODY><DATA><COLLECTION>
-    <LEDGER NAME="Bharat Steel &amp; Alloys Pvt Ltd">
-      <NAME>Bharat Steel &amp; Alloys Pvt Ltd</NAME>
-      <PARENT>Sundry Debtors</PARENT>
-      <GUID>led-cust-001</GUID>
-      <ALTERID>21</ALTERID>
-      <PARTYGSTIN>27AABCS1429B1ZB</PARTYGSTIN>
-      <INCOMETAXNUMBER>AABCS1429B</INCOMETAXNUMBER>
-      <STATENAME>Maharashtra</STATENAME>
-      <COUNTRYNAME>India</COUNTRYNAME>
-      <PINCODE>400001</PINCODE>
-      <EMAIL>billing@bharatsteel.com</EMAIL>
-      <LEDGERPHONE>+91 9820012345</LEDGERPHONE>
-      <CREDITLIMIT>500000.00</CREDITLIMIT>
-      <ADDRESS.LIST><ADDRESS>Plot 14, MIDC Industrial Area, Andheri East</ADDRESS></ADDRESS.LIST>
-    </LEDGER>
-    <LEDGER NAME="Apex Industrial Supplies">
-      <NAME>Apex Industrial Supplies</NAME>
-      <PARENT>Sundry Creditors</PARENT>
-      <GUID>led-vend-001</GUID>
-      <ALTERID>22</ALTERID>
-      <PARTYGSTIN>24AAACA9876C1Z3</PARTYGSTIN>
-      <STATENAME>Gujarat</STATENAME>
-      <COUNTRYNAME>India</COUNTRYNAME>
-      <PINCODE>380001</PINCODE>
-      <EMAIL>orders@apexsupplies.in</EMAIL>
-    </LEDGER>
-    <LEDGER NAME="HDFC Bank Current A/c">
-      <NAME>HDFC Bank Current A/c</NAME>
-      <PARENT>Bank Accounts</PARENT>
-      <GUID>led-bank-001</GUID>
-      <ALTERID>23</ALTERID>
-    </LEDGER>
-    <LEDGER NAME="CGST @ 9%"><NAME>CGST @ 9%</NAME><PARENT>Duties &amp; Taxes</PARENT><TAXTYPE>GST</TAXTYPE><GSTDUTYHEAD>CGST</GSTDUTYHEAD><RATEOFTAXCALCULATION>9.00</RATEOFTAXCALCULATION><GUID>led-cgst-001</GUID><ALTERID>24</ALTERID></LEDGER>
-    <LEDGER NAME="SGST @ 9%"><NAME>SGST @ 9%</NAME><PARENT>Duties &amp; Taxes</PARENT><TAXTYPE>GST</TAXTYPE><GSTDUTYHEAD>SGST</GSTDUTYHEAD><RATEOFTAXCALCULATION>9.00</RATEOFTAXCALCULATION><GUID>led-sgst-001</GUID><ALTERID>25</ALTERID></LEDGER>
-    <LEDGER NAME="IGST @ 18%"><NAME>IGST @ 18%</NAME><PARENT>Duties &amp; Taxes</PARENT><TAXTYPE>GST</TAXTYPE><GSTDUTYHEAD>IGST</GSTDUTYHEAD><RATEOFTAXCALCULATION>18.00</RATEOFTAXCALCULATION><GUID>led-igst-001</GUID><ALTERID>26</ALTERID></LEDGER>
-  </COLLECTION></DATA></BODY>
+  <BODY><DATA><COLLECTION>{items}</COLLECTION></DATA></BODY>
 </ENVELOPE>"""
 
-DUMMY_STOCK_ITEMS_XML = """<ENVELOPE>
+    def export_ledgers_xml(self):
+        res = []
+        for l in self.ledgers.values():
+            if "xml" in l:
+                clean = re.sub(r'<TALLYMESSAGE[^>]*>', '', l["xml"]).replace('</TALLYMESSAGE>', '').strip()
+                res.append(clean)
+            else:
+                res.append(f'<LEDGER NAME="{xml_escape(l["name"])}"><NAME>{xml_escape(l["name"])}</NAME><PARENT>{xml_escape(l.get("parent","Sundry Debtors"))}</PARENT><GUID>{xml_escape(l.get("guid",""))}</GUID><ALTERID>200</ALTERID></LEDGER>')
+        return f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER>
-  <BODY><DATA><COLLECTION>
-    <STOCKITEM NAME="Industrial Hydraulic Valve 50mm">
-      <NAME>Industrial Hydraulic Valve 50mm</NAME>
-      <PARENT>Valves &amp; Fittings</PARENT>
-      <BASEUNITS>Nos</BASEUNITS>
-      <HSNCODE>84818030</HSNCODE>
-      <OPENINGBALANCE>50 Nos</OPENINGBALANCE>
-      <OPENINGRATE>1200.00</OPENINGRATE>
-      <OPENINGVALUE>-60000.00</OPENINGVALUE>
-      <GUID>item-valve-001</GUID>
-      <ALTERID>31</ALTERID>
-    </STOCKITEM>
-    <STOCKITEM NAME="High Pressure Steel Pipe 2-inch">
-      <NAME>High Pressure Steel Pipe 2-inch</NAME>
-      <PARENT>Pipes &amp; Tubes</PARENT>
-      <BASEUNITS>Mtr</BASEUNITS>
-      <HSNCODE>73063000</HSNCODE>
-      <OPENINGBALANCE>200 Mtr</OPENINGBALANCE>
-      <OPENINGRATE>450.00</OPENINGRATE>
-      <OPENINGVALUE>-90000.00</OPENINGVALUE>
-      <GUID>item-pipe-001</GUID>
-      <ALTERID>32</ALTERID>
-    </STOCKITEM>
-  </COLLECTION></DATA></BODY>
+  <BODY><DATA><COLLECTION>{chr(10).join(res)}</COLLECTION></DATA></BODY>
 </ENVELOPE>"""
 
-DUMMY_UNITS_XML = """<ENVELOPE>
+    def export_units_xml(self):
+        items = "\n".join(f'<UNIT NAME="{xml_escape(u["name"])}"><NAME>{xml_escape(u["name"])}</NAME><ORIGINALNAME>{xml_escape(u.get("originalname", u["name"]))}</ORIGINALNAME><DECIMALPLACES>{u.get("decimal_places", 0)}</DECIMALPLACES><GUID>{xml_escape(u.get("guid",""))}</GUID><ALTERID>300</ALTERID></UNIT>' for u in self.units.values())
+        return f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER>
-  <BODY><DATA><COLLECTION>
-    <UNIT NAME="Nos"><NAME>Nos</NAME><ORIGINALNAME>Numbers</ORIGINALNAME><DECIMALPLACES>0</DECIMALPLACES><GSTREPUOM>NOS</GSTREPUOM><GUID>uom-nos-001</GUID><ALTERID>41</ALTERID></UNIT>
-    <UNIT NAME="Mtr"><NAME>Mtr</NAME><ORIGINALNAME>Meters</ORIGINALNAME><DECIMALPLACES>2</DECIMALPLACES><GSTREPUOM>MTR</GSTREPUOM><GUID>uom-mtr-001</GUID><ALTERID>42</ALTERID></UNIT>
-  </COLLECTION></DATA></BODY>
+  <BODY><DATA><COLLECTION>{items}</COLLECTION></DATA></BODY>
 </ENVELOPE>"""
 
-DUMMY_VOUCHERS_XML = """<ENVELOPE>
+    def export_stock_groups_xml(self):
+        items = []
+        for g in self.stock_groups.values():
+            if "xml" in g:
+                clean = re.sub(r'<TALLYMESSAGE[^>]*>', '', g["xml"]).replace('</TALLYMESSAGE>', '').strip()
+                items.append(clean)
+            else:
+                items.append(f'<STOCKGROUP NAME="{xml_escape(g["name"])}"><NAME>{xml_escape(g["name"])}</NAME><PARENT>{xml_escape(g.get("parent","Primary"))}</PARENT><GUID>{xml_escape(g.get("guid",""))}</GUID><ALTERID>400</ALTERID></STOCKGROUP>')
+        return f"""<ENVELOPE>
   <HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER>
-  <BODY><DATA><COLLECTION>
-    <VOUCHER VCHTYPE="Sales" ACTION="Create">
-      <GUID>vch-sale-001</GUID>
-      <ALTERID>51</ALTERID>
-      <DATE>20260901</DATE>
-      <VOUCHERTYPENAME>Sales</VOUCHERTYPENAME>
-      <VOUCHERNUMBER>INV/2026/001</VOUCHERNUMBER>
-      <PARTYLEDGERNAME>Bharat Steel &amp; Alloys Pvt Ltd</PARTYLEDGERNAME>
-      <REFERENCE>PO-9988</REFERENCE>
-      <NARRATION>Standard dispatch of hydraulic valves</NARRATION>
-      <ALLINVENTORYENTRIES.LIST>
-        <STOCKITEMNAME>Industrial Hydraulic Valve 50mm</STOCKITEMNAME>
-        <ACTUALQTY>10 Nos</ACTUALQTY>
-        <BILLEDQTY>10 Nos</BILLEDQTY>
-        <RATE>1500.00/Nos</RATE>
-        <AMOUNT>-15000.00</AMOUNT>
-      </ALLINVENTORYENTRIES.LIST>
-      <ALLLEDGERENTRIES.LIST>
-        <LEDGERNAME>Bharat Steel &amp; Alloys Pvt Ltd</LEDGERNAME>
-        <AMOUNT>17700.00</AMOUNT>
-        <BILLALLOCATIONS.LIST>
-          <NAME>INV/2026/001</NAME>
-          <BILLTYPE>New Ref</BILLTYPE>
-          <AMOUNT>17700.00</AMOUNT>
-        </BILLALLOCATIONS.LIST>
-      </ALLLEDGERENTRIES.LIST>
-      <ALLLEDGERENTRIES.LIST>
-        <LEDGERNAME>Sales Account</LEDGERNAME>
-        <AMOUNT>-15000.00</AMOUNT>
-      </ALLLEDGERENTRIES.LIST>
-      <ALLLEDGERENTRIES.LIST>
-        <LEDGERNAME>CGST @ 9%</LEDGERNAME>
-        <AMOUNT>-1350.00</AMOUNT>
-      </ALLLEDGERENTRIES.LIST>
-      <ALLLEDGERENTRIES.LIST>
-        <LEDGERNAME>SGST @ 9%</LEDGERNAME>
-        <AMOUNT>-1350.00</AMOUNT>
-      </ALLLEDGERENTRIES.LIST>
-    </VOUCHER>
-  </COLLECTION></DATA></BODY>
+  <BODY><DATA><COLLECTION>{chr(10).join(items)}</COLLECTION></DATA></BODY>
 </ENVELOPE>"""
+
+    def export_stock_items_xml(self):
+        items = []
+        for item in self.stock_items.values():
+            if "xml" in item:
+                clean = re.sub(r'<TALLYMESSAGE[^>]*>', '', item["xml"]).replace('</TALLYMESSAGE>', '').strip()
+                items.append(clean)
+            else:
+                items.append(f'<STOCKITEM NAME="{xml_escape(item["name"])}"><NAME>{xml_escape(item["name"])}</NAME><PARENT>{xml_escape(item.get("parent","Primary"))}</PARENT><BASEUNITS>{xml_escape(item.get("base_uom","Nos"))}</BASEUNITS><GUID>{xml_escape(item.get("guid",""))}</GUID><ALTERID>500</ALTERID></STOCKITEM>')
+        return f"""<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER>
+  <BODY><DATA><COLLECTION>{chr(10).join(items)}</COLLECTION></DATA></BODY>
+</ENVELOPE>"""
+
+    def export_godowns_xml(self):
+        items = "\n".join(f'<GODOWN NAME="{xml_escape(g["name"])}"><NAME>{xml_escape(g["name"])}</NAME><PARENT>{xml_escape(g.get("parent","Primary"))}</PARENT><GUID>{xml_escape(g.get("guid",""))}</GUID><ALTERID>600</ALTERID></GODOWN>' for g in self.godowns.values())
+        return f"""<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER>
+  <BODY><DATA><COLLECTION>{items}</COLLECTION></DATA></BODY>
+</ENVELOPE>"""
+
+    def export_vouchers_xml(self):
+        items = []
+        for v in self.vouchers.values():
+            clean = re.sub(r'<TALLYMESSAGE[^>]*>', '', v["xml"]).replace('</TALLYMESSAGE>', '').strip()
+            items.append(clean)
+        return f"""<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER>
+  <BODY><DATA><COLLECTION>{chr(10).join(items)}</COLLECTION></DATA></BODY>
+</ENVELOPE>"""
+
+
+STORE = TallyStore()
 
 
 class MockTallyHandler(BaseHTTPRequestHandler):
@@ -153,38 +255,49 @@ class MockTallyHandler(BaseHTTPRequestHandler):
 
         logger.info(f"Received request ({content_length} bytes)")
 
-        # Route responses based on request payload
+        # 1. Company List
         if "<REPORTNAME>List of Companies</REPORTNAME>" in req_body or "<TYPE>Company</TYPE>" in req_body:
-            resp = """<ENVELOPE>
-  <HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER>
-  <BODY><DATA><COLLECTION>
-    <COMPANY NAME="Scidecs Demo Ltd"><NAME>Scidecs Demo Ltd</NAME><STARTINGFROM>20260401</STARTINGFROM></COMPANY>
-    <COMPANY NAME="Acme Trading Corp"><NAME>Acme Trading Corp</NAME><STARTINGFROM>20260401</STARTINGFROM></COMPANY>
-  </COLLECTION></DATA></BODY>
-</ENVELOPE>"""
+            resp = STORE.export_companies_xml()
+
+        # 2. Import Data
         elif ("<TALLYREQUEST>Import Data</TALLYREQUEST>" in req_body
-              or ("<TALLYREQUEST>Import</TALLYREQUEST>" in req_body
-                  and "<TYPE>Data</TYPE>" in req_body)):
-            resp = """<RESPONSE>
-  <CREATED>1</CREATED>
-  <ALTERED>0</ALTERED>
-  <DELETED>0</DELETED>
-  <LASTVCHID>1001</LASTVCHID>
-  <LASTMID>2001</LASTMID>
-  <ERRORS>0</ERRORS>
-</RESPONSE>"""
-        elif "<ID>Day Book</ID>" in req_body:
-            resp = DUMMY_VOUCHERS_XML
+              or ("<TALLYREQUEST>Import</TALLYREQUEST>" in req_body and "<TYPE>Data</TYPE>" in req_body)):
+            count = STORE.import_xml(req_body)
+            resp = f"""<ENVELOPE>
+  <HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER>
+  <BODY><DATA><IMPORTRESULT>
+    <CREATED>{count}</CREATED>
+    <ALTERED>0</ALTERED>
+    <DELETED>0</DELETED>
+    <LASTVCHID>1001</LASTVCHID>
+    <LASTMID>2001</LASTMID>
+    <COMBINED>0</COMBINED>
+    <IGNORED>0</IGNORED>
+    <ERRORS>0</ERRORS>
+    <CANCELLED>0</CANCELLED>
+    <EXCEPTIONS>0</EXCEPTIONS>
+  </IMPORTRESULT></DATA></BODY>
+</ENVELOPE>"""
+
+        # 3. Export Day Book / Vouchers
+        elif "<ID>Day Book</ID>" in req_body or "<TYPE>Voucher</TYPE>" in req_body:
+            resp = STORE.export_vouchers_xml()
+
+        # 4. Export Masters
         elif "StockItem" in req_body:
-            resp = DUMMY_STOCK_ITEMS_XML
+            resp = STORE.export_stock_items_xml()
+        elif "StockGroup" in req_body:
+            resp = STORE.export_stock_groups_xml()
         elif "Unit" in req_body:
-            resp = DUMMY_UNITS_XML
+            resp = STORE.export_units_xml()
+        elif "Godown" in req_body:
+            resp = STORE.export_godowns_xml()
         elif "Group" in req_body:
-            resp = DUMMY_GROUPS_XML
+            resp = STORE.export_groups_xml()
         elif "Ledger" in req_body:
-            resp = DUMMY_LEDGERS_XML
+            resp = STORE.export_ledgers_xml()
         else:
-            resp = DUMMY_LEDGERS_XML
+            resp = STORE.export_ledgers_xml()
 
         self.send_response(200)
         self.send_header("Content-Type", "text/xml;charset=utf-8")

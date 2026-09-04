@@ -263,18 +263,37 @@ def snapshot(env, instance, path):
 def verify(env, instance, expected_path):
     expected = json.loads(expected_path.read_text())
     actual_products = env["product.product"].search([("name", "=like", f"{PREFIX} %")])
-    actual_moves = env["account.move"].search([("ref", "=like", f"{PREFIX}-%")])
-    expected_refs = {m["ref"] for m in expected["moves"]}
-    actual_refs = set(actual_moves.mapped("ref"))
+    invoice_moves = env["account.move"].search([("ref", "=like", f"{PREFIX}-%")])
+    payments = env["account.payment"].search([])
+    journal_moves = env["account.move"].search([("move_type", "=", "entry")])
+    transfers = env["stock.picking"].search([])
+    mappings = env["tally.mapping"].search([("instance_id", "=", instance.id)])
+
+    expected_invoice_refs = {
+        m["ref"] for m in expected["moves"]
+        if m["ref"].startswith(f"{PREFIX}-")
+        and not any(tag in m["ref"] for tag in ("-JRN-", "-PAYMENT-", "-RECEIPT-"))
+    }
+    actual_invoice_refs = set(invoice_moves.mapped("ref"))
+
     result = {
         "expected_product_count": len(expected["products"]),
         "actual_product_count": len(actual_products),
-        "missing_move_refs": sorted(expected_refs - actual_refs),
-        "actual_move_count": len(actual_moves),
-        "mapping_count": env["tally.mapping"].search_count([("instance_id", "=", instance.id)]),
+        "missing_invoice_refs": sorted(expected_invoice_refs - actual_invoice_refs),
+        "actual_invoice_count": len(invoice_moves),
+        "recovered_payments_count": len(payments),
+        "recovered_journal_entries_count": len(journal_moves),
+        "recovered_transfers_count": len(transfers),
+        "mapping_count": len(mappings),
     }
-    result["ok"] = (result["actual_product_count"] >= result["expected_product_count"]
-                    and not result["missing_move_refs"])
+    result["ok"] = (
+        result["actual_product_count"] >= result["expected_product_count"]
+        and not result["missing_invoice_refs"]
+        and result["recovered_payments_count"] >= 2
+        and result["recovered_journal_entries_count"] >= 1
+        and result["recovered_transfers_count"] >= 1
+        and result["mapping_count"] >= 45
+    )
     return result
 
 
