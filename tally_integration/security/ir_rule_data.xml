@@ -31,6 +31,12 @@
             <field name="global" eval="True"/>
             <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
         </record>
+        <record id="tally_inbound_dead_letter_company_rule" model="ir.rule">
+            <field name="name">Tally Inbound Quarantine: multi-company</field>
+            <field name="model_id" ref="model_tally_inbound_dead_letter"/>
+            <field name="global" eval="True"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
         <record id="tally_discovered_company_rule" model="ir.rule">
             <field name="name">Tally Discovered Company: multi-company</field>
             <field name="model_id" ref="model_tally_discovered_company"/>

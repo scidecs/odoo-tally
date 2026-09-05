@@ -108,7 +108,9 @@ class SyncEngine:
 
         processed = 0
         errors = 0
+        quarantined = 0
         max_alterid = 0
+        DeadLetter = self.env["tally.inbound.dead.letter"]
 
         handler_map = {
             "currency": self._upsert_currency,
@@ -152,6 +154,12 @@ class SyncEngine:
                 skipped += 1
                 continue
 
+            dead = DeadLetter.for_record(self.instance, entity, rec)
+            if dead and dead.state == "quarantined":
+                quarantined += 1
+                skipped += 1
+                continue
+
             # Echo-suppression check
             guid = rec.get("guid")
             p_hash = compute_payload_hash(rec)
@@ -167,6 +175,8 @@ class SyncEngine:
                     "tally_masterid": str(rec.get("alterid") or mapping.tally_masterid or ""),
                     "last_sync": fields.Datetime.now(),
                 })
+                DeadLetter.resolve_record(self.instance, entity, rec)
+                skipped += 1
                 continue
             if mapping and cfg_base.source_of_truth == "odoo":
                 # The Odoo-owned version is authoritative. Record the observed Tally
@@ -178,6 +188,7 @@ class SyncEngine:
                     "last_origin": "odoo",
                     "last_sync": fields.Datetime.now(),
                 })
+                DeadLetter.resolve_record(self.instance, entity, rec)
                 skipped += 1
                 continue
 
@@ -196,6 +207,7 @@ class SyncEngine:
                             origin="tally",
                         )
                         self._maybe_autopost(entity, odoo_record)
+                        DeadLetter.resolve_record(self.instance, entity, rec)
                         if getattr(self.instance, "verbose_logging", True):
                             nm = (rec.get("name") or rec.get("voucher_number")
                                   or odoo_record.display_name)
@@ -205,16 +217,24 @@ class SyncEngine:
                                 odoo_model_name=odoo_record._name, odoo_res_id=odoo_record.id,
                                 tally_guid=guid, record_count=1)
             except Exception as e:
-                errors += 1
-                if mapping:
-                    mapping.state = "conflict"
+                dead = DeadLetter.record_failure(self.instance, entity, rec, e)
+                is_quarantined = dead.state == "quarantined"
+                if is_quarantined:
+                    quarantined += 1
+                else:
+                    errors += 1
                 _logger.exception("Error upserting %s: %s", entity, e)
                 try:
+                    label = rec.get("name") or rec.get("voucher_number")
+                    if is_quarantined:
+                        msg = _("QUARANTINED after %s attempts: %s '%s' — %s") % (
+                            dead.attempts, entity, label, str(e))
+                    else:
+                        msg = f"Failed upserting {entity} {label}: {str(e)}"
                     self.env["tally.sync.log"].log(
-                        self.instance, "tally_to_odoo", entity, "error",
-                        f"Failed upserting {entity} {rec.get('name') or rec.get('voucher_number')}: {str(e)}",
-                        detail=str(rec),
-                        tally_guid=guid,
+                        self.instance, "tally_to_odoo", entity,
+                        "warning" if is_quarantined else "error", msg,
+                        detail=str(rec), tally_guid=guid,
                     )
                 except Exception:
                     pass
@@ -240,6 +260,7 @@ class SyncEngine:
             )
 
         return {"processed": processed, "errors": errors,
+                "quarantined": quarantined, "skipped": skipped,
                 "watermark": cfg.last_alterid if cfg else max_alterid}
 
     def process_vouchers(self, vouchers, alterid=None):
@@ -614,11 +635,23 @@ class SyncEngine:
             "uom_id": uom.id if uom else False,
             "company_id": self.company.id,
         }
+        parent_group = (data.get("parent_group") or "").strip()
+        if parent_group and parent_group.lower() != "primary":
+            category = self.env["product.category"].search([
+                ("name", "=ilike", parent_group),
+            ], limit=1)
+            if not category:
+                category = self.env["product.category"].create({"name": parent_group})
+            vals["categ_id"] = category.id
         if barcode:
             vals["barcode"] = barcode
-            vals["default_code"] = barcode
+        part_no = (data.get("part_no") or "").strip()
+        if part_no or barcode:
+            vals["default_code"] = part_no or barcode
         if rate > 0:
             vals["standard_price"] = rate
+        if float(data.get("sale_price") or 0.0) > 0:
+            vals["list_price"] = float(data["sale_price"])
 
         if "is_storable" in Product._fields and prod_type != "service":
             vals["is_storable"] = True
@@ -693,8 +726,19 @@ class SyncEngine:
 
                 self._set_location_quant(product, target_loc, qty)
         else:
-            if target_qty != 0.0:
-                self._set_location_quant(product, default_loc, target_qty)
+            # A direct Tally stock-item export reports the company's total
+            # closing balance, not the balance of Odoo's default warehouse.
+            # Keep quantities already recovered into other internal locations
+            # (for example by a Stock Journal) and put only the residual in the
+            # default location.  This makes repeated master pulls idempotent.
+            other_internal_qty = sum(Quant.search([
+                ("product_id", "=", product.id),
+                ("location_id", "!=", default_loc.id),
+                ("location_id.usage", "=", "internal"),
+                ("company_id", "=", self.company.id),
+            ]).mapped("quantity"))
+            self._set_location_quant(
+                product, default_loc, float(target_qty or 0.0) - other_internal_qty)
 
     def _set_location_quant(self, product, location, qty):
         """Set or adjust stock.quant at a specific internal location."""
@@ -710,7 +754,7 @@ class SyncEngine:
                 if quant.quantity != qty:
                     quant.with_context(inventory_mode=True).write({"inventory_quantity": qty})
                     quant.action_apply_inventory()
-            else:
+            elif qty:
                 q = Quant.with_context(inventory_mode=True).create({
                     "product_id": product.id,
                     "location_id": location.id,
@@ -1236,7 +1280,8 @@ class SyncEngine:
         if not journal:
             journal = self._get_or_create_journal("bank" if "bank" in (bank_cash_ledger or "").lower() else "cash")
 
-        memo_parts = [vch_num]
+        business_ref = data.get("reference") or data.get("narration") or vch_num
+        memo_parts = [business_ref]
         if data.get("cheque_no"):
             memo_parts.append(f"Chq: {data['cheque_no']}")
 
@@ -1252,7 +1297,7 @@ class SyncEngine:
         }
 
         rec = Payment.search([
-            ("memo", "=ilike", vch_num),
+            ("memo", "=ilike", business_ref),
             ("payment_type", "=", pay_type),
             ("company_id", "=", self.company.id)
         ], limit=1)
@@ -1315,10 +1360,11 @@ class SyncEngine:
 
         journal = self._get_or_create_journal("general")
 
+        business_ref = data.get("reference") or data.get("narration") or vch_num
         vals = {
             "move_type": "entry",
             "date": date_str,
-            "ref": vch_num,
+            "ref": business_ref,
             "narration": f"<p>{data['narration']}</p>" if data.get("narration") else False,
             "journal_id": journal.id if journal else False,
             "company_id": self.company.id,
@@ -1326,7 +1372,7 @@ class SyncEngine:
         }
 
         rec = Move.search([
-            ("ref", "=", vch_num),
+            ("ref", "=", business_ref),
             ("move_type", "=", "entry"),
             ("company_id", "=", self.company.id)
         ], limit=1)
@@ -1400,7 +1446,8 @@ class SyncEngine:
         if not outgoing or not incoming:
             raise ValueError(_("Stock Journal requires both outward and inward inventory lines."))
         Picking = self.env["stock.picking"]
-        ref = data.get("voucher_number") or data.get("guid")
+        ref = (data.get("reference") or data.get("narration") or
+               data.get("voucher_number") or data.get("guid"))
         picking = Picking.search([
             ("origin", "=", ref), ("company_id", "=", self.company.id),
             ("picking_type_id.code", "=", "internal"),
@@ -1464,10 +1511,12 @@ class SyncEngine:
         elif picking.state == "draft":
             picking.move_ids.unlink()
             picking.write(vals)
-        if self.instance.auto_post and picking.state == "draft":
-            picking.action_confirm()
+        if self.instance.auto_post and picking.state not in ("done", "cancel"):
+            if picking.state == "draft":
+                picking.action_confirm()
             for move in picking.move_ids:
                 move.quantity = move.product_uom_qty
+                move.picked = True
             picking._action_done()
         return picking
 

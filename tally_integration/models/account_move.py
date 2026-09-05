@@ -50,6 +50,17 @@ class AccountMove(models.Model):
             party_name = self.partner_id.name or "Cash"
             accounts_only = instance.tally_inventory == "accounts_only"
 
+            # Vouchers may reference ledgers that predate connector setup. Queue
+            # every dependency explicitly so first-time synchronization works.
+            for account in self.line_ids.account_id:
+                account._enqueue_tally_account()
+            if self.partner_id:
+                self.partner_id._enqueue_tally_party()
+            for product in self.invoice_line_ids.product_id:
+                product.product_tmpl_id._enqueue_tally_product()
+            for tax in self.invoice_line_ids.tax_ids:
+                tax._enqueue_tally_tax()
+
             ledger_entries = []
             inventory_entries = []
 
@@ -87,7 +98,8 @@ class AccountMove(models.Model):
                             "qty": line.quantity,
                             "rate": line.price_unit,
                             "amount": line_amt,
-                            "uom": line.product_uom_id.name if line.product_uom_id else "Nos",
+                            "uom": tally_xml_builder.normalize_tally_uom(
+                                line.product_uom_id.name if line.product_uom_id else "Nos"),
                             "discount": getattr(line, "discount", 0.0),
                             "account_ledger": acc_name,
                         })
@@ -118,6 +130,7 @@ class AccountMove(models.Model):
                 reference=self.ref,
                 is_invoice=(self.move_type != "entry"),
                 guid=guid,
+                educational_mode=instance.tally_educational_mode,
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company, report_type="Vouchers")

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_tally_inbound_dead_letter_list" model="ir.ui.view">
+        <field name="name">tally.inbound.dead.letter.list</field>
+        <field name="model">tally.inbound.dead.letter</field>
+        <field name="arch" type="xml">
+            <list string="Inbound Quarantine" create="false" delete="false">
+                <field name="last_failed"/>
+                <field name="instance_id"/>
+                <field name="entity"/>
+                <field name="record_name"/>
+                <field name="tally_alterid"/>
+                <field name="attempts"/>
+                <field name="state" widget="badge"
+                       decoration-warning="state == 'pending'"
+                       decoration-danger="state == 'quarantined'"
+                       decoration-success="state == 'resolved'"/>
+                <button name="action_retry" type="object" string="Retry"
+                        invisible="state == 'pending'" groups="tally_integration.group_tally_manager"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_tally_inbound_dead_letter_form" model="ir.ui.view">
+        <field name="name">tally.inbound.dead.letter.form</field>
+        <field name="model">tally.inbound.dead.letter</field>
+        <field name="arch" type="xml">
+            <form string="Inbound Quarantine" create="false" delete="false">
+                <header>
+                    <button name="action_retry" type="object" string="Retry on Next Pull"
+                            class="btn-primary" invisible="state == 'pending'"
+                            groups="tally_integration.group_tally_manager"/>
+                    <button name="action_quarantine" type="object" string="Quarantine"
+                            invisible="state == 'quarantined'"
+                            groups="tally_integration.group_tally_manager"/>
+                    <button name="action_resolve" type="object" string="Mark Resolved"
+                            invisible="state == 'resolved'"
+                            groups="tally_integration.group_tally_manager"/>
+                    <field name="state" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="instance_id"/>
+                            <field name="entity"/>
+                            <field name="record_name"/>
+                            <field name="tally_guid"/>
+                            <field name="tally_alterid"/>
+                        </group>
+                        <group>
+                            <field name="attempts"/>
+                            <field name="first_failed"/>
+                            <field name="last_failed"/>
+                            <field name="resolved_date"/>
+                            <field name="payload_hash"/>
+                        </group>
+                    </group>
+                    <separator string="Last Error"/>
+                    <field name="error" nolabel="1"/>
+                    <separator string="Inbound Payload"/>
+                    <field name="payload" nolabel="1"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_tally_inbound_dead_letter_search" model="ir.ui.view">
+        <field name="name">tally.inbound.dead.letter.search</field>
+        <field name="model">tally.inbound.dead.letter</field>
+        <field name="arch" type="xml">
+            <search string="Inbound Quarantine">
+                <field name="record_name"/>
+                <field name="tally_guid"/>
+                <field name="instance_id"/>
+                <filter string="Quarantined" name="quarantined" domain="[('state', '=', 'quarantined')]"/>
+                <filter string="Retrying" name="pending" domain="[('state', '=', 'pending')]"/>
+                <filter string="Resolved" name="resolved" domain="[('state', '=', 'resolved')]"/>
+                <group>
+                    <filter string="Entity" name="group_entity" context="{'group_by': 'entity'}"/>
+                    <filter string="State" name="group_state" context="{'group_by': 'state'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_tally_inbound_dead_letter" model="ir.actions.act_window">
+        <field name="name">Inbound Quarantine</field>
+        <field name="res_model">tally.inbound.dead.letter</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_tally_inbound_dead_letter_search"/>
+        <field name="context">{'search_default_quarantined': 1}</field>
+    </record>
+</odoo>

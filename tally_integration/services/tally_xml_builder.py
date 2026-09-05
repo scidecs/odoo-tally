@@ -7,6 +7,7 @@ Builds standard Tally XML messages for:
 - Export / AlterID query requests (TDL Collections)
 """
 import html
+from datetime import date
 from xml.sax.saxutils import escape
 
 
@@ -34,6 +35,22 @@ def format_tally_date(dt, educational_mode=False):
         day = int(clean[6:8])
         if day not in (1, 2, 31):
             clean = f"{clean[:6]}01"
+    return clean
+
+
+def normalize_tally_uom(name):
+    """Return the canonical Tally unit used by outbound stock masters/vouchers."""
+    value = (name or "Nos").strip()
+    return "Nos" if value in ("Units", "Unit(s)", "Unit", "Nos") else value
+
+
+def format_standard_rate_date(value=None):
+    """Format a Tally standard cost/price applicability date as YYYYMMDD."""
+    if value is None:
+        value = date.today()
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y%m%d")
+    clean = str(value).replace("-", "").replace("/", "")[:8]
     return clean
 
 
@@ -117,7 +134,8 @@ def build_group_xml(name, parent=None, nature=None, guid=None):
 
 
 def build_account_ledger_xml(name, parent="Indirect Expenses", opening_balance=0.0,
-                             is_billwise=False, currency="INR", description=None, guid=None):
+                             is_billwise=False, currency="INR", description=None, guid=None,
+                             affects_stock=False):
     """Build General Account <LEDGER> XML."""
     guid_tag = f'<GUID>{xml_escape(guid)}</GUID>' if guid else ''
     op_bal_tag = f'<OPENINGBALANCE>{float(opening_balance or 0.0):.2f}</OPENINGBALANCE>' if opening_balance else ''
@@ -129,6 +147,7 @@ def build_account_ledger_xml(name, parent="Indirect Expenses", opening_balance=0
     <PARENT>{xml_escape(parent or 'Indirect Expenses')}</PARENT>
     <ISBILLWISEON>{'Yes' if is_billwise else 'No'}</ISBILLWISEON>
     <ISCOSTCENTRESON>No</ISCOSTCENTRESON>
+    <AFFECTSSTOCK>{'Yes' if affects_stock else 'No'}</AFFECTSSTOCK>
     <CURRENCYNAME>{xml_escape(currency or 'INR')}</CURRENCYNAME>
     {op_bal_tag}
     {desc_tag}
@@ -211,13 +230,22 @@ def build_stock_group_xml(name, parent=None, guid=None):
 
 def build_stock_item_xml(name, base_uom="Nos", parent_group="Primary", hsn_code=None,
                          gst_rate=0.0, standard_cost=0.0, sale_price=0.0,
-                         opening_qty=0.0, opening_rate=0.0, guid=None):
+                         opening_qty=0.0, opening_rate=0.0, guid=None,
+                         part_no=None, barcode=None, effective_date=None):
     """Build <STOCKITEM> XML."""
     guid_tag = f'<GUID>{xml_escape(guid)}</GUID>' if guid else ''
     hsn_tag = f'<HSNCODE>{xml_escape(hsn_code)}</HSNCODE>' if hsn_code else ''
     gst_tag = f'<GSTRATEDETAILS.LIST><GSTRATE>{float(gst_rate or 0.0):.2f}</GSTRATE></GSTRATEDETAILS.LIST>' if gst_rate else ''
-    cost_tag = f'<STANDARDCOSTLIST.LIST><RATE>{float(standard_cost or 0.0):.2f}</RATE></STANDARDCOSTLIST.LIST>' if standard_cost else ''
-    price_tag = f'<STANDARDPRICELIST.LIST><RATE>{float(sale_price or 0.0):.2f}</RATE></STANDARDPRICELIST.LIST>' if sale_price else ''
+    rate_date = format_standard_rate_date(effective_date)
+    cost_tag = (f'<STANDARDCOSTLIST.LIST><DATE>{rate_date}</DATE>'
+                f'<RATE>{float(standard_cost or 0.0):.2f}</RATE>'
+                f'</STANDARDCOSTLIST.LIST>') if standard_cost else ''
+    price_tag = (f'<STANDARDPRICELIST.LIST><DATE>{rate_date}</DATE>'
+                 f'<RATE>{float(sale_price or 0.0):.2f}</RATE>'
+                 f'</STANDARDPRICELIST.LIST>') if sale_price else ''
+    part_tag = (f'<MAILINGNAME.LIST TYPE="String"><MAILINGNAME>'
+                f'{xml_escape(part_no)}</MAILINGNAME></MAILINGNAME.LIST>') if part_no else ''
+    barcode_tag = f'<BARCODE>{xml_escape(barcode)}</BARCODE>' if barcode else ''
 
     op_val = float(opening_qty or 0) * float(opening_rate or 0)
     op_xml = f"""<OPENINGBALANCE>{float(opening_qty):.2f} {xml_escape(base_uom)}</OPENINGBALANCE>
@@ -232,6 +260,8 @@ def build_stock_item_xml(name, base_uom="Nos", parent_group="Primary", hsn_code=
     <NAME>{xml_escape(name)}</NAME>
     {parent_tag}
     <BASEUNITS>{xml_escape(base_uom or 'Nos')}</BASEUNITS>
+    {part_tag}
+    {barcode_tag}
     {hsn_tag}
     {gst_tag}
     {cost_tag}
@@ -289,7 +319,8 @@ def build_tax_ledger_xml(name, gst_type="CGST", rate=0.0, parent="Duties & Taxes
 
 def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
                       ledger_entries=None, inventory_entries=None,
-                      narration=None, guid=None, reference=None, is_invoice=True):
+                      narration=None, guid=None, reference=None, is_invoice=True,
+                      educational_mode=False):
     """Build a complete balanced <VOUCHER> XML message for Tally.
 
     :param voucher_type: Sales, Purchase, Credit Note, Debit Note, Receipt, Payment, Journal, Contra
@@ -304,7 +335,7 @@ def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
     :param guid: optional GUID
     """
     guid_tag = f'<GUID>{xml_escape(guid)}</GUID>' if guid else ''
-    date_str = format_tally_date(date)
+    date_str = format_tally_date(date, educational_mode=educational_mode)
     ref_tag = f'<REFERENCE>{xml_escape(reference)}</REFERENCE>' if reference else ''
     narration_tag = f'<NARRATION>{xml_escape(narration)}</NARRATION>' if narration else ''
 
@@ -314,7 +345,7 @@ def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
         for inv in inventory_entries:
             item_name = inv.get("item", "")
             qty = float(inv.get("qty", 0.0))
-            uom = inv.get("uom", "Nos")
+            uom = normalize_tally_uom(inv.get("uom", "Nos"))
             rate = float(inv.get("rate", 0.0))
             amount = float(inv.get("amount", 0.0))
             godown = inv.get("godown", "Main Location")
@@ -324,6 +355,7 @@ def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
             batch_xml = f"""<BATCHALLOCATIONS.LIST>
             <GODOWNNAME>{xml_escape(godown)}</GODOWNNAME>
             <BATCHNAME>Primary Batch</BATCHNAME>
+            <DESTINATIONGODOWNNAME>{xml_escape(godown)}</DESTINATIONGODOWNNAME>
             <AMOUNT>{amount:.2f}</AMOUNT>
             <ACTUALQTY>{qty:.2f} {xml_escape(uom)}</ACTUALQTY>
             <BILLEDQTY>{qty:.2f} {xml_escape(uom)}</BILLEDQTY>
@@ -339,7 +371,12 @@ def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
             <AMOUNT>{amount:.2f}</AMOUNT>
           </ACCOUNTINGALLOCATIONS.LIST>"""
 
-            inv_xml.append(f"""        <ALLINVENTORYENTRIES.LIST>
+            # Tally names Stock Journal consumption/source rows "IN" and
+            # production/destination rows "OUT". Its own export uses a
+            # negative amount in IN and a positive amount in OUT.
+            inventory_tag = ("INVENTORYENTRIESIN.LIST" if amount < 0
+                             else "INVENTORYENTRIESOUT.LIST") if voucher_type == "Stock Journal" else "ALLINVENTORYENTRIES.LIST"
+            inv_xml.append(f"""        <{inventory_tag}>
           <STOCKITEMNAME>{xml_escape(item_name)}</STOCKITEMNAME>
           <ISDEEMEDPOSITIVE>{'Yes' if amount < 0 else 'No'}</ISDEEMEDPOSITIVE>
           <RATE>{rate:.2f}/{xml_escape(uom)}</RATE>
@@ -348,7 +385,7 @@ def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
           <BILLEDQTY>{qty:.2f} {xml_escape(uom)}</BILLEDQTY>
           {disc_tag}
           {batch_xml}{acc_alloc_xml}
-        </ALLINVENTORYENTRIES.LIST>""")
+        </{inventory_tag}>""")
 
     inv_entries_str = "\n".join(inv_xml)
 
@@ -384,25 +421,34 @@ def build_voucher_xml(voucher_type, voucher_number, date, party_ledger,
           </COSTCENTREALLOCATIONS.LIST>""")
             cc_alloc_str = "\n".join(cc_allocs)
 
-            led_xml.append(f"""        <ALLLEDGERENTRIES.LIST>
+            ledger_tag = "LEDGERENTRIES.LIST" if is_invoice else "ALLLEDGERENTRIES.LIST"
+            led_xml.append(f"""        <{ledger_tag}>
           <LEDGERNAME>{xml_escape(led_name)}</LEDGERNAME>
           <ISDEEMEDPOSITIVE>{is_deemed_positive}</ISDEEMEDPOSITIVE>
+          <ISPARTYLEDGER>{'Yes' if led.get('bill_allocations') else 'No'}</ISPARTYLEDGER>
+          <ISLASTDEEMEDPOSITIVE>{is_deemed_positive}</ISLASTDEEMEDPOSITIVE>
           <AMOUNT>{amount:.2f}</AMOUNT>
 {bill_alloc_str}
 {cc_alloc_str}
-        </ALLLEDGERENTRIES.LIST>""")
+        </{ledger_tag}>""")
 
     led_entries_str = "\n".join(led_xml)
 
+    persisted_view = ("Consumption Voucher View" if voucher_type == "Stock Journal"
+                      else "Invoice Voucher View" if is_invoice
+                      else "Accounting Voucher View")
     return f"""<TALLYMESSAGE xmlns:UDF="TallyUDF">
-  <VOUCHER VCHTYPE="{xml_escape(voucher_type)}" ACTION="Create" OBJVIEW="Accounting Voucher View">
+  <VOUCHER VCHTYPE="{xml_escape(voucher_type)}" ACTION="Create" OBJVIEW="{persisted_view}"{(' REMOTEID="' + xml_escape(guid) + '"') if guid else ''}>
     {guid_tag}
+    {f'<REMOTEID>{xml_escape(guid)}</REMOTEID>' if guid else ''}
     <DATE>{date_str}</DATE>
     <EFFECTIVEDATE>{date_str}</EFFECTIVEDATE>
     <VOUCHERTYPENAME>{xml_escape(voucher_type)}</VOUCHERTYPENAME>
     <VOUCHERNUMBER>{xml_escape(voucher_number)}</VOUCHERNUMBER>
     <PARTYLEDGERNAME>{xml_escape(party_ledger)}</PARTYLEDGERNAME>
+    <PERSISTEDVIEW>{persisted_view}</PERSISTEDVIEW>
     <ISINVOICE>{'Yes' if is_invoice else 'No'}</ISINVOICE>
+    <OBJVIEW>{persisted_view}</OBJVIEW>
     {ref_tag}
     {narration_tag}
 {inv_entries_str}

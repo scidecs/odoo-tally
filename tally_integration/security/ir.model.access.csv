@@ -9,6 +9,8 @@ access_tally_sync_log_user,tally.sync.log.user,model_tally_sync_log,group_tally_
 access_tally_sync_log_manager,tally.sync.log.manager,model_tally_sync_log,group_tally_manager,1,1,1,1
 access_tally_sync_queue_user,tally.sync.queue.user,model_tally_sync_queue,group_tally_user,1,0,0,0
 access_tally_sync_queue_manager,tally.sync.queue.manager,model_tally_sync_queue,group_tally_manager,1,1,1,1
+access_tally_inbound_dead_letter_user,tally.inbound.dead.letter.user,model_tally_inbound_dead_letter,group_tally_user,1,0,0,0
+access_tally_inbound_dead_letter_manager,tally.inbound.dead.letter.manager,model_tally_inbound_dead_letter,group_tally_manager,1,1,1,1
 access_tally_account_type_map_user,tally.account.type.map.user,model_tally_account_type_map,group_tally_user,1,0,0,0
 access_tally_account_type_map_manager,tally.account.type.map.manager,model_tally_account_type_map,group_tally_manager,1,1,1,1
 access_tally_discovered_company_user,tally.discovered.company.user,model_tally_discovered_company,group_tally_user,1,0,0,0

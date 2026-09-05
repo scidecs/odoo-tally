@@ -220,12 +220,12 @@ Every entity can be individually enabled/disabled with independent directional c
 | `group` | `account.group` | `<GROUP>` | Tally → Odoo | Group Name, Parent Group hierarchy |
 | `account_ledger` | `account.account` | `<LEDGER>` (General) | Both / Directional | Name, Code, Account Type, Currency |
 | `ledger` | `res.partner` | `<LEDGER>` (Party) | Both / Directional | Name, GSTIN, PAN, Address, State, PIN, Phone, Email, Credit Limit |
-| `uom` | `uom.uom` | `<UNIT>` | Tally → Odoo | Unit Name, Symbol, Decimal Places |
-| `stock_group` | `product.category` | `<STOCKGROUP>` | Tally → Odoo | Category Name, Parent Category |
+| `uom` | `uom.uom` | `<UNIT>` | Both / Directional | Unit Name, Symbol, Decimal Places |
+| `stock_group` | `product.category` | `<STOCKGROUP>` | Both / Directional | Category Name, Parent Category |
 | `stock_item` | `product.product` | `<STOCKITEM>` | Both / Directional | Name, Base UoM, Category, HSN Code, Cost Price, Sale Price |
-| `cost_centre` | `account.analytic.account` | `<COSTCENTRE>` | Tally → Odoo | Cost Centre Name, Analytic Plan |
-| `godown` | `stock.location` | `<GODOWN>` | Tally → Odoo | Location Name, Parent Location |
-| `tax` | `account.tax` | `<LEDGER>` (Duties/Taxes) | Tally → Odoo | Tax Name, Rate of Tax (%), Tax Type |
+| `cost_centre` | `account.analytic.account` | `<COSTCENTRE>` | Both / Directional | Cost Centre Name, Analytic Plan |
+| `godown` | `stock.location` | `<GODOWN>` | Both / Directional | Location Name, Parent Location |
+| `tax` | `account.tax` | `<LEDGER>` (Duties/Taxes) | Both / Directional | Tax Name, Rate of Tax (%), Tax Type |
 
 ### Vouchers / Transactions Mapping Table
 

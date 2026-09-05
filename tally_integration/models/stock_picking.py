@@ -30,6 +30,10 @@ class StockPicking(models.Model):
                     continue
                 guid = self.env["tally.mapping"].outbound_guid(
                     instance, "stock_journal", picking._name, picking.id)
+                for location in picking.location_id | picking.location_dest_id:
+                    location._enqueue_tally_godown()
+                for product in picking.move_ids.product_id:
+                    product.product_tmpl_id._enqueue_tally_product()
                 entries = []
                 for move in picking.move_ids.filtered(lambda m: m.state == "done"):
                     qty = move.quantity
@@ -39,13 +43,15 @@ class StockPicking(models.Model):
                     common = {
                         "item": move.product_id.name,
                         "rate": rate,
-                        "uom": move.product_uom.name,
+                        "uom": tally_xml_builder.normalize_tally_uom(move.product_uom.name),
                     }
                     entries.extend([
-                        dict(common, qty=-qty, amount=-(qty * rate),
-                             godown=move.location_id.complete_name),
+                        # The OUT collection determines movement direction in
+                        # Tally; quantity itself remains positive.
+                        dict(common, qty=qty, amount=-(qty * rate),
+                             godown=move.location_id.name),
                         dict(common, qty=qty, amount=qty * rate,
-                             godown=move.location_dest_id.complete_name),
+                             godown=move.location_dest_id.name),
                     ])
                 if not entries:
                     continue
@@ -53,7 +59,8 @@ class StockPicking(models.Model):
                     voucher_type="Stock Journal", voucher_number=picking.name,
                     date=picking.date_done or picking.scheduled_date,
                     party_ledger="", inventory_entries=entries,
-                    narration=picking.origin or picking.note, is_invoice=False, guid=guid)
+                    narration=picking.origin or picking.note, is_invoice=False, guid=guid,
+                    educational_mode=instance.tally_educational_mode)
                 payload = tally_xml_builder.wrap_import_envelope(
                     [message], company_name=instance.tally_company, report_type="Vouchers")
                 if not self.env["tally.mapping"].register_outbound(

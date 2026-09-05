@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 from odoo.tests import TransactionCase, tagged
 
 from ..services.sync_engine import SyncEngine
+from ..services.tally_xml_parser import parse_stock_items_from_xml, parse_tally_xml_root
 
 
 @tagged("post_install", "-at_install")
@@ -43,6 +44,55 @@ class TestTallySyncEngine(TransactionCase):
                 "uom", [{"name": "Broken", "guid": "broken-uom", "alterid": 42}])
         self.assertEqual(result["errors"], 1)
         self.assertEqual(config.last_alterid, 0)
+
+    def test_poison_record_is_quarantined_and_watermark_can_advance(self):
+        config = self._config("uom")
+        engine = SyncEngine(self.env, self.instance)
+        record = {"name": "Persistently Broken", "guid": "poison-uom", "alterid": 42}
+        results = []
+        with patch.object(engine, "_upsert_uom", side_effect=ValueError("invalid UoM")):
+            for _attempt in range(3):
+                results.append(engine.process_inbound_batch("uom", [record]))
+
+        dead = self.env["tally.inbound.dead.letter"].search([
+            ("instance_id", "=", self.instance.id), ("entity", "=", "uom"),
+            ("record_key", "=", "poison-uom"),
+        ])
+        self.assertEqual(len(dead), 1)
+        self.assertEqual(dead.attempts, 3)
+        self.assertEqual(dead.state, "quarantined")
+        self.assertEqual(results[0]["errors"], 1)
+        self.assertEqual(results[1]["errors"], 1)
+        self.assertEqual(results[2]["errors"], 0)
+        self.assertEqual(results[2]["quarantined"], 1)
+        self.assertEqual(config.last_alterid, 42)
+
+        dead.action_retry()
+        self.assertEqual(dead.state, "pending")
+        self.assertEqual(dead.attempts, 0)
+        self.assertEqual(config.last_alterid, 41)
+
+    def test_echo_acknowledgement_resolves_previous_failure(self):
+        self._config("uom", direction="both", source="bidirectional")
+        record = {"name": "Acknowledged UoM", "guid": "echo-uom", "alterid": 7}
+        dead_letters = self.env["tally.inbound.dead.letter"]
+        dead = dead_letters.record_failure(
+            self.instance, "uom", record, ValueError("temporary failure"))
+        self.env["tally.mapping"].create({
+            "instance_id": self.instance.id,
+            "entity": "uom",
+            "tally_guid": "echo-uom",
+            "odoo_model_name": "uom.uom",
+            "odoo_res_id": self.env.ref("uom.product_uom_unit").id,
+            "last_origin": "odoo",
+        })
+
+        result = SyncEngine(self.env, self.instance).process_inbound_batch(
+            "uom", [record])
+
+        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(dead.state, "resolved")
+        self.assertTrue(dead.resolved_date)
 
     def test_tally_origin_workflow_event_is_not_echoed(self):
         self._config("ledger", direction="both", source="bidirectional")
@@ -179,6 +229,53 @@ class TestTallySyncEngine(TransactionCase):
         self.assertEqual(picking.move_ids.product_uom_qty, 2.0)
         self.assertNotEqual(picking.location_id, picking.location_dest_id)
 
+    def test_repeated_total_stock_pull_preserves_secondary_location(self):
+        """A total closing balance must not be added on top of godown stock."""
+        engine = SyncEngine(self.env, self.instance)
+        warehouse = self.env["stock.warehouse"].search([
+            ("company_id", "=", self.env.company.id),
+        ], limit=1)
+        product = self.env["product.product"].with_context(tally_no_sync=True).create({
+            "name": "Idempotent Closing Balance Item", "is_storable": True,
+        })
+        secondary = self.env["stock.location"].with_context(tally_no_sync=True).create({
+            "name": "Recovered Secondary Godown",
+            "location_id": warehouse.lot_stock_id.id,
+            "usage": "internal", "company_id": self.env.company.id,
+        })
+        engine._set_location_quant(product, secondary, 1.0)
+
+        engine._apply_stock_quantities(product, 8.0)
+        engine._apply_stock_quantities(product, 8.0)
+
+        internal_qty = sum(self.env["stock.quant"].search([
+            ("product_id", "=", product.id),
+            ("location_id.usage", "=", "internal"),
+            ("company_id", "=", self.env.company.id),
+        ]).mapped("quantity"))
+        self.assertEqual(internal_qty, 8.0)
+        secondary_quant = self.env["stock.quant"].search([
+            ("product_id", "=", product.id), ("location_id", "=", secondary.id),
+        ])
+        self.assertEqual(sum(secondary_quant.mapped("quantity")), 1.0)
+
+    def test_inbound_stock_item_preserves_tally_stock_group(self):
+        product = SyncEngine(self.env, self.instance)._upsert_stock_item({
+            "name": "Categorised Inbound Item",
+            "parent_group": "Inbound Hydraulic Group",
+            "base_uom": "Units", "quantity": 0.0,
+            "guid": "77777777-7777-7777-7777-777777777777",
+        })
+        self.assertEqual(product.categ_id.name, "Inbound Hydraulic Group")
+
+    def test_zero_closing_balance_does_not_fall_back_to_opening(self):
+        root = parse_tally_xml_root("""<ENVELOPE><STOCKITEM NAME="Zero Stock Item">
+          <OPENINGBALANCE>5 Nos</OPENINGBALANCE>
+          <CLOSINGBALANCE>0 Nos</CLOSINGBALANCE>
+        </STOCKITEM></ENVELOPE>""")
+        parsed = parse_stock_items_from_xml(root)
+        self.assertEqual(parsed[0]["quantity"], 0.0)
+
     def test_outbound_payment_builds_queue_item(self):
         self._config("receipt", direction="both", source="odoo")
         engine = SyncEngine(self.env, self.instance)
@@ -238,6 +335,28 @@ class TestTallySyncEngine(TransactionCase):
         ])
         self.assertEqual(before, after)
 
+    def test_product_create_enqueues_exactly_once(self):
+        self._config("stock_item", direction="both", source="odoo")
+        product = self.env["product.product"].create({
+            "name": "Single Product Queue Event", "is_storable": True,
+            "standard_price": 10.0, "list_price": 15.0,
+            "company_id": self.env.company.id,
+        })
+        queue = self.env["tally.sync.queue"].search([
+            ("instance_id", "=", self.instance.id), ("entity", "=", "stock_item"),
+            ("odoo_model_name", "=", product._name), ("odoo_res_id", "=", product.id),
+        ])
+        self.assertEqual(len(queue), 1)
+
+    def test_stock_item_standard_rates_include_required_effective_date(self):
+        from ..services.tally_xml_builder import build_stock_item_xml
+        root = ET.fromstring(build_stock_item_xml(
+            "Dated Rate Item", standard_cost=80, sale_price=100,
+            effective_date="2026-09-05"))
+        self.assertEqual(root.findtext(".//STANDARDCOSTLIST.LIST/DATE"), "20260905")
+        self.assertEqual(root.findtext(".//STANDARDPRICELIST.LIST/DATE"), "20260905")
+        self.assertEqual(root.findtext(".//STANDARDPRICELIST.LIST/RATE"), "100.00")
+
     def test_completed_internal_transfer_enqueues_stock_journal(self):
         self._config("stock_journal", direction="both", source="odoo")
         warehouse = self.env["stock.warehouse"].search([
@@ -280,6 +399,13 @@ class TestTallySyncEngine(TransactionCase):
         self.assertIn("<VOUCHERTYPENAME>Stock Journal</VOUCHERTYPENAME>", queue.payload)
         self.assertIn("Outbound Source", queue.payload)
         self.assertIn("Outbound Destination", queue.payload)
+        root = ET.fromstring(queue.payload)
+        source_row = root.find(".//INVENTORYENTRIESIN.LIST")
+        destination_row = root.find(".//INVENTORYENTRIESOUT.LIST")
+        self.assertIsNotNone(source_row)
+        self.assertIsNotNone(destination_row)
+        self.assertLess(float(source_row.findtext("AMOUNT")), 0.0)
+        self.assertGreater(float(destination_row.findtext("AMOUNT")), 0.0)
 
     def test_outbound_invoice_and_return_payloads_balance_with_tax(self):
         engine = SyncEngine(self.env, self.instance)
@@ -330,6 +456,13 @@ class TestTallySyncEngine(TransactionCase):
             ])
             self.assertEqual(len(queue), 1)
             root = ET.fromstring(queue.payload)
-            ledger_total = sum(float(node.text or 0.0) for node in root.findall(".//ALLLEDGERENTRIES.LIST/AMOUNT"))
+            # Inventory invoices use Tally's invoice-view LEDGERENTRIES.LIST;
+            # accounting-only vouchers use ALLLEDGERENTRIES.LIST.
+            ledger_total = sum(
+                float(node.text or 0.0)
+                for path in (".//LEDGERENTRIES.LIST/AMOUNT",
+                             ".//ALLLEDGERENTRIES.LIST/AMOUNT")
+                for node in root.findall(path)
+            )
             inventory_total = sum(float(node.text or 0.0) for node in root.findall(".//ALLINVENTORYENTRIES.LIST/AMOUNT"))
             self.assertAlmostEqual(ledger_total + inventory_total, 0.0, places=2)

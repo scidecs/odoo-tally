@@ -38,6 +38,11 @@ class AccountPayment(models.Model):
             journal = self.journal_id
             pay_ref = getattr(self, "memo", False) or self.name or str(self.id)
 
+            if self.partner_id:
+                self.partner_id._enqueue_tally_party()
+            if journal.default_account_id:
+                journal.default_account_id._enqueue_tally_account()
+
             # Resolve mapped Tally bank/cash ledger name
             bank_or_cash = None
             if journal.default_account_id:
@@ -97,6 +102,7 @@ class AccountPayment(models.Model):
                 reference=pay_ref,
                 is_invoice=False,
                 guid=guid,
+                educational_mode=instance.tally_educational_mode,
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company, report_type="Vouchers")

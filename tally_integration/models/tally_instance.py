@@ -121,12 +121,20 @@ class TallyInstance(models.Model):
         string="Tally Mode", default="with_inventory", required=True,
         help="Match your Tally company. 'Accounts only' companies receive ledger-only "
              "vouchers (no inventory entries).")
+    tally_educational_mode = fields.Boolean(
+        string="Tally Educational Mode",
+        help="Use educational-mode voucher dates (1st, 2nd, or 31st). Enable only for an "
+             "unlicensed Tally test environment; licensed production companies keep the real date.")
     sync_automated_valuation_stock = fields.Boolean(
         string="Adjust Automated-Valuation Stock",
         default=False,
         help="Allow Tally quantities to create Odoo inventory valuation entries for automated-"
              "valuation product categories. Keep disabled when financial opening balances are "
              "also migrated, otherwise stock value can be counted twice.")
+    inbound_quarantine_threshold = fields.Integer(
+        string="Inbound Quarantine Attempts", default=3,
+        help="After this many failures of the same Tally record revision, quarantine it and "
+             "allow the entity watermark to continue. Operators can retry it from Operations.")
 
     # --- Onboarding / initial migration ---
     coa_mode = fields.Selection(
@@ -164,11 +172,16 @@ class TallyInstance(models.Model):
     queue_pending = fields.Integer(compute="_compute_counts")
     queue_failed = fields.Integer(compute="_compute_counts")
     orphan_count = fields.Integer(compute="_compute_counts")
+    quarantine_count = fields.Integer(compute="_compute_counts")
     synced_today = fields.Integer(string="Synced Today", compute="_compute_counts")
 
     _name_company_uniq = models.Constraint(
         "UNIQUE(name, company_id)",
         "Instance name must be unique per company.",
+    )
+    _positive_quarantine_threshold = models.Constraint(
+        "CHECK(inbound_quarantine_threshold >= 1)",
+        "Inbound quarantine attempts must be at least 1.",
     )
 
     @api.constrains("active", "company_id")
@@ -189,6 +202,7 @@ class TallyInstance(models.Model):
         mapping = self.env["tally.mapping"]
         log = self.env["tally.sync.log"]
         queue = self.env["tally.sync.queue"]
+        dead_letter = self.env["tally.inbound.dead.letter"]
         for rec in self:
             rec.mapping_count = mapping.search_count([("instance_id", "=", rec.id)])
             rec.log_count = log.search_count([("instance_id", "=", rec.id)])
@@ -198,6 +212,8 @@ class TallyInstance(models.Model):
                 [("instance_id", "=", rec.id), ("state", "=", "failed")])
             rec.orphan_count = mapping.search_count(
                 [("instance_id", "=", rec.id), ("is_orphan", "=", True)])
+            rec.quarantine_count = dead_letter.search_count(
+                [("instance_id", "=", rec.id), ("state", "=", "quarantined")])
             rec.synced_today = log.search_count([
                 ("instance_id", "=", rec.id),
                 ("create_date", ">=", fields.Datetime.to_string(
@@ -342,6 +358,30 @@ class TallyInstance(models.Model):
 
     def action_view_queue_failed(self):
         return self.action_view_queue(state="failed")
+
+    def action_view_quarantine(self):
+        self.ensure_one()
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Quarantined Records"),
+            "res_model": "tally.inbound.dead.letter",
+            "view_mode": "list,form",
+            "domain": [("instance_id", "=", self.id), ("state", "=", "quarantined")],
+        }
+
+    def action_retry_quarantined(self):
+        """Clear quarantine flags and force a re-pull of the affected entities so the
+        (now hopefully fixed) records are retried."""
+        self.ensure_one()
+        q = self.env["tally.inbound.dead.letter"].search(
+            [("instance_id", "=", self.id), ("state", "=", "quarantined")])
+        q.action_retry()
+        return {
+            "type": "ir.actions.client", "tag": "display_notification",
+            "params": {"title": _("Quarantine cleared"),
+                       "message": _("%s record(s) released; affected watermarks were safely rewound.") % len(q),
+                       "type": "success", "sticky": False},
+        }
 
     def action_view_orphans(self):
         self.ensure_one()
@@ -610,7 +650,7 @@ class TallyInstance(models.Model):
                 from_aid = cfg.last_alterid if self.use_tdl_delta else None
                 fetch_f = None
                 if cfg.entity == "stock_item":
-                    fetch_f = "NAME,PARENT,BASEUNITS,HSNCODE,HSNDESCRIPTION,OPENINGBALANCE,OPENINGVALUE,OPENINGRATE,CLOSINGBALANCE,CLOSINGVALUE,CLOSINGRATE,BATCHALLOCATIONS.LIST"
+                    fetch_f = "NAME,GUID,MASTERID,ALTERID,PARENT,BASEUNITS,MAILINGNAME,MAILINGNAME.LIST,BARCODE,HSNCODE,HSNDESCRIPTION,STANDARDCOST,STANDARDPRICE,OPENINGBALANCE,OPENINGVALUE,OPENINGRATE,CLOSINGBALANCE,CLOSINGVALUE,CLOSINGRATE,BATCHALLOCATIONS.LIST"
                 xml = tally_xml_builder.build_collection_export(
                     ctype, company_name=self.tally_company, from_alterid=from_aid, fetch_fields=fetch_f)
                 resp = tally_transport.post_xml(ep["url"], xml, auth=ep["auth"],

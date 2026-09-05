@@ -14,7 +14,7 @@ import odoo
 from odoo import api, SUPERUSER_ID
 from odoo.modules.registry import Registry
 
-PREFIX = "RT260904"
+PREFIX = "RT260904F"
 PRODUCTS = [
     ("Hydraulic Pump 5HP", "84136090", 7200.0, 9500.0),
     ("Industrial Valve 50mm", "84818030", 1200.0, 1750.0),
@@ -46,6 +46,7 @@ def one(model, domain, values):
 def seed(env, instance):
     from odoo.addons.tally_integration.services.sync_engine import SyncEngine
 
+    instance.tally_educational_mode = True
     entities = {
         "account_ledger", "ledger", "uom", "stock_group", "stock_item", "godown",
         "cost_centre", "tax", "sales", "credit_note", "purchase", "debit_note",
@@ -117,7 +118,7 @@ def seed(env, instance):
         name = f"{PREFIX} {index:02d} {label}"
         vals = {
             "name": name, "default_code": f"{PREFIX}-P{index:02d}",
-            "barcode": f"260904{index:06d}", "is_storable": True,
+            "barcode": f"260906{index:06d}", "is_storable": True,
             "standard_price": cost, "list_price": price,
             "categ_id": categories[(index - 1) % len(categories)].id,
             "property_account_income_id": income.id,
@@ -143,6 +144,7 @@ def seed(env, instance):
         })
     elif not bank_journal.default_account_id:
         bank_journal.default_account_id = bank.id
+    bank_journal.default_account_id._enqueue_tally_account()
 
     def invoice(ref, move_type, partner, selected, qty, taxes_for_lines, journal, account):
         Move = env["account.move"]
@@ -214,8 +216,12 @@ def seed(env, instance):
         sold = 3 if index < 7 else 4
         purchase_return = 2 if index in (1, 2) else 0
         sale_return = 1 if index in (0, 1) else 0
+        target_total = purchased - sold - purchase_return + sale_return
+        secondary_qty = sum(env["stock.quant"].search([
+            ("product_id", "=", product.id), ("location_id", "=", secondary.id),
+        ]).mapped("quantity"))
         engine._set_location_quant(product, warehouse.lot_stock_id,
-                                   purchased - sold - purchase_return + sale_return)
+                                   target_total - secondary_qty)
 
     transfer_origin = f"{PREFIX}-STJ-01"
     transfer = env["stock.picking"].search([("origin", "=", transfer_origin)], limit=1)
@@ -233,6 +239,16 @@ def seed(env, instance):
         transfer.action_confirm()
         transfer.move_ids.quantity = 1.0
         transfer.button_validate()
+
+    # Rebuild transactional payloads after educational-mode date normalization.
+    unit = env.ref("uom.product_uom_unit", raise_if_not_found=False)
+    if unit:
+        unit._enqueue_tally_uom()
+    for move in moves:
+        move._enqueue_tally_voucher()
+    for record in payments:
+        record._enqueue_tally_payment()
+    transfer._enqueue_tally_stock_journal()
 
     return {"products": products, "moves": moves, "payments": payments, "transfer": transfer,
             "customer": customer, "vendor": vendor}
@@ -263,10 +279,14 @@ def snapshot(env, instance, path):
 def verify(env, instance, expected_path):
     expected = json.loads(expected_path.read_text())
     actual_products = env["product.product"].search([("name", "=like", f"{PREFIX} %")])
-    invoice_moves = env["account.move"].search([("ref", "=like", f"{PREFIX}-%")])
-    payments = env["account.payment"].search([])
-    journal_moves = env["account.move"].search([("move_type", "=", "entry")])
-    transfers = env["stock.picking"].search([])
+    invoice_moves = env["account.move"].search([
+        ("ref", "=like", f"{PREFIX}-%"),
+        ("move_type", "in", ("out_invoice", "out_refund", "in_invoice", "in_refund")),
+    ])
+    payments = env["account.payment"].search([("memo", "=like", f"{PREFIX}-%")])
+    journal_moves = env["account.move"].search([
+        ("move_type", "=", "entry"), ("ref", "=like", f"{PREFIX}-JRN-%")])
+    transfers = env["stock.picking"].search([("origin", "=like", f"{PREFIX}-%")])
     mappings = env["tally.mapping"].search([("instance_id", "=", instance.id)])
 
     expected_invoice_refs = {
@@ -280,54 +300,312 @@ def verify(env, instance, expected_path):
         "expected_product_count": len(expected["products"]),
         "actual_product_count": len(actual_products),
         "missing_invoice_refs": sorted(expected_invoice_refs - actual_invoice_refs),
+        "unexpected_invoice_refs": sorted(actual_invoice_refs - expected_invoice_refs),
         "actual_invoice_count": len(invoice_moves),
         "recovered_payments_count": len(payments),
         "recovered_journal_entries_count": len(journal_moves),
         "recovered_transfers_count": len(transfers),
+        "invoice_mismatches": {},
+        "product_quantity_mismatches": {},
+        "payments": sorted((p.memo, p.payment_type, float(p.amount)) for p in payments),
+        "transfers": sorted((p.origin, p.state) for p in transfers),
         "mapping_count": len(mappings),
+        "sync_log_error_count": env["tally.sync.log"].search_count([
+            ("instance_id", "=", instance.id), ("status", "=", "error"),
+        ]),
     }
+    expected_moves = {m["ref"]: m for m in expected["moves"]
+                      if m["ref"] in expected_invoice_refs}
+    actual_moves = {m.ref: m for m in invoice_moves if m.ref in expected_invoice_refs}
+    for ref, exp in expected_moves.items():
+        move = actual_moves.get(ref)
+        if not move or any(abs(float(got) - float(exp[key])) > 0.01 for key, got in (
+                ("untaxed", move.amount_untaxed), ("tax", move.amount_tax),
+                ("total", move.amount_total))):
+            result["invoice_mismatches"][ref] = {
+                "expected": [exp["untaxed"], exp["tax"], exp["total"]],
+                "actual": ([float(move.amount_untaxed), float(move.amount_tax),
+                            float(move.amount_total)] if move else None),
+            }
+    expected_products = {p["name"]: p for p in expected["products"]}
+    actual_product_map = {p.name: p for p in actual_products}
+    expected_categories = ("Hydraulics", "Electrical", "Industrial Consumables")
+    for product_index, (name, exp) in enumerate(expected_products.items()):
+        product = actual_product_map.get(name)
+        expected_category = f"{PREFIX} {expected_categories[product_index % 3]}"
+        actual_values = (None if not product else {
+            "qty": float(product.qty_available), "cost": float(product.standard_price),
+            "price": float(product.list_price), "code": product.default_code,
+            "category": product.categ_id.name,
+        })
+        if (not product or actual_values["code"] != exp["code"]
+                or actual_values["category"] != expected_category
+                or any(abs(actual_values[key] - float(exp[key])) > 0.0001
+                       for key in ("qty", "cost", "price"))):
+            result["product_quantity_mismatches"][name] = {
+                "expected": dict({k: exp[k] for k in ("qty", "cost", "price", "code")},
+                                 category=expected_category),
+                "actual": actual_values,
+            }
+    expected_payment_rows = sorted(
+        (p["memo"], p["type"], float(p["amount"])) for p in expected["payments"])
+    actual_payment_rows = sorted(
+        (p.memo, p.payment_type, float(p.amount)) for p in payments)
     result["ok"] = (
-        result["actual_product_count"] >= result["expected_product_count"]
+        result["actual_product_count"] == result["expected_product_count"]
         and not result["missing_invoice_refs"]
-        and result["recovered_payments_count"] >= 2
-        and result["recovered_journal_entries_count"] >= 1
-        and result["recovered_transfers_count"] >= 1
+        and not result["unexpected_invoice_refs"]
+        and result["actual_invoice_count"] == len(expected_invoice_refs)
+        and not result["invoice_mismatches"]
+        and not result["product_quantity_mismatches"]
+        and actual_payment_rows == expected_payment_rows
+        and result["recovered_journal_entries_count"] == 1
+        and sorted((p.origin, p.state) for p in transfers) == [(f"{PREFIX}-STJ-01", "done")]
         and result["mapping_count"] >= 45
+        and result["sync_log_error_count"] == 0
     )
     return result
 
 
+def bootstrap(env):
+    """Configure a newly-created Odoo database for the recovery pull."""
+    company = env.company
+    india = env["res.country"].search([("code", "=", "IN")], limit=1)
+    inr = env["res.currency"].with_context(active_test=False).search(
+        [("name", "=", "INR")], limit=1)
+    vals = {"name": "Scidecs Tally Recovery Test"}
+    if india:
+        vals["country_id"] = india.id
+    if inr:
+        inr.active = True
+        vals["currency_id"] = inr.id
+    company.write(vals)
+    instance = env["tally.instance"].create({
+        "name": "Scidecs Demo Tally Recovery",
+        "company_id": company.id,
+        "connection_mode": "direct",
+        "tally_host": "192.168.68.103",
+        "tally_port": 9000,
+        "tally_protocol": "http",
+        "tally_company": "Scidecs Demo Pvt Ltd",
+        "odoo_role": "full",
+        "tally_inventory": "with_inventory",
+        "tally_educational_mode": True,
+        "history_from": "2026-09-01",
+        "pull_lookback_days": 30,
+        "auto_post": True,
+        "direct_auto_pull": False,
+        "verbose_logging": True,
+        "default_source": "tally",
+    })
+    instance.action_load_default_entities()
+    instance.entity_config_ids.write({
+        "enabled": True, "direction": "both", "source_of_truth": "bidirectional",
+    })
+    return instance
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("seed", "push", "snapshot", "verify"))
+    parser.add_argument("mode", choices=("bootstrap", "seed", "push", "pull", "snapshot",
+                                         "verify", "alter-product", "inspect-product",
+                                         "set-odoo-price", "inspect-tally-product",
+                                         "restore-products", "verify-tally-products"))
     parser.add_argument("--database", default="odootally_local")
     parser.add_argument("--instance-id", type=int, default=1)
     parser.add_argument("--config", type=Path, default=ROOT / "config" / "odoo-local.conf")
     parser.add_argument("--expected", type=Path,
                         default=ROOT / "artifacts" / "roundtrip_expected.json")
+    parser.add_argument("--output", type=Path,
+                        help="Optional path for the JSON result/evidence file")
+    parser.add_argument("--product-name",
+                        default=f"{PREFIX} 15 Industrial Grease 5Kg")
+    parser.add_argument("--price", type=float,
+                        help="Selling price used by alter-product")
+    parser.add_argument("--effective-date", default="2026-09-01",
+                        help="Applicable-from date for alter-product (YYYY-MM-DD)")
     args = parser.parse_args()
     configure_odoo(args.config, args.database)
     registry = Registry(args.database)
     with registry.cursor() as cr:
         env = api.Environment(cr, SUPERUSER_ID, {})
+        if args.mode == "bootstrap":
+            instance = bootstrap(env)
+            cr.commit()
+            print(json.dumps({"instance_id": instance.id, "company": instance.company_id.name,
+                              "entity_count": len(instance.entity_config_ids)}, indent=2))
+            return
         instance = env["tally.instance"].browse(args.instance_id).exists()
         if not instance:
             raise SystemExit(f"Tally instance {args.instance_id} does not exist")
-        # Ensure live Tally is online
-        import urllib.request
-        live_url = f"http://{instance.tally_host}:{instance.tally_port}"
-        try:
-            test_req = urllib.request.Request(
-                live_url,
-                data=b"<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>Company</ID></HEADER><BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES></DESC></BODY></ENVELOPE>",
-                headers={"Content-Type": "text/xml"}
-            )
-            with urllib.request.urlopen(test_req, timeout=5) as r:
-                pass
-        except Exception as e:
-            raise SystemExit(f"[PAUSED] Real Live Tally server at {live_url} is offline: {e}")
+        # Only network modes require Tally. Snapshot and verification remain
+        # useful while the desktop/server is temporarily unavailable.
+        if args.mode in ("push", "pull", "alter-product", "inspect-tally-product",
+                         "verify-tally-products"):
+            import urllib.request
+            live_url = f"http://{instance.tally_host}:{instance.tally_port}"
+            try:
+                test_req = urllib.request.Request(
+                    live_url,
+                    data=b"<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>Company</ID></HEADER><BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES></DESC></BODY></ENVELOPE>",
+                    headers={"Content-Type": "text/xml"}
+                )
+                with urllib.request.urlopen(test_req, timeout=5):
+                    pass
+            except Exception as e:
+                raise SystemExit(f"[PAUSED] Real Live Tally server at {live_url} is offline: {e}")
 
-        if args.mode == "seed":
+        if args.mode == "verify-tally-products":
+            from odoo.addons.tally_integration.services import tally_transport, tally_xml_builder, tally_xml_parser
+            request = tally_xml_builder.build_collection_export(
+                "StockItem", company_name=instance.tally_company,
+                fetch_fields="NAME,GUID,ALTERID,PARENT,MAILINGNAME,MAILINGNAME.LIST,STANDARDCOST,STANDARDPRICE,CLOSINGBALANCE")
+            endpoint = instance._tally_endpoint()
+            response = tally_transport.post_xml(
+                endpoint["url"], request, auth=endpoint["auth"],
+                extra_headers=endpoint["headers"], verify=endpoint["verify"])
+            parsed = tally_xml_parser.parse_stock_items_from_xml(
+                tally_xml_parser.parse_tally_xml_root(response))
+            rows = [row for row in parsed if row["name"].startswith(f"{PREFIX} ")]
+            by_name = {row["name"]: row for row in rows}
+            category_names = ("Hydraulics", "Electrical", "Industrial Consumables")
+            mismatches = {}
+            for index, (label, _hsn, cost, price) in enumerate(PRODUCTS, 1):
+                name = f"{PREFIX} {index:02d} {label}"
+                expected_row = {
+                    "parent_group": f"{PREFIX} {category_names[(index - 1) % 3]}",
+                    "part_no": f"{PREFIX}-P{index:02d}", "rate": cost,
+                    "sale_price": price,
+                }
+                row = by_name.get(name)
+                if (not row or any(row[key] != value for key, value in expected_row.items())):
+                    mismatches[name] = {"expected": expected_row, "actual": row}
+            result = {"expected_count": len(PRODUCTS), "actual_count": len(rows),
+                      "mismatches": mismatches,
+                      "ok": len(rows) == len(PRODUCTS) and not mismatches}
+        elif args.mode == "restore-products":
+            category_names = ("Hydraulics", "Electrical", "Industrial Consumables")
+            restored = []
+            for index, (label, _hsn, cost, price) in enumerate(PRODUCTS, 1):
+                product_name = f"{PREFIX} {index:02d} {label}"
+                product = env["product.product"].search([
+                    ("name", "=", product_name),
+                ], limit=1)
+                category_name = f"{PREFIX} {category_names[(index - 1) % 3]}"
+                category = env["product.category"].search([
+                    ("name", "=", category_name),
+                ], limit=1)
+                if not product or not category:
+                    raise SystemExit(f"Missing recovery product/category: {product_name} / {category_name}")
+                product.product_tmpl_id.write({
+                    "categ_id": category.id, "standard_price": cost, "list_price": price,
+                })
+                restored.append({"product": product_name, "category": category_name,
+                                 "cost": cost, "price": price})
+            cr.commit()
+            result = {"restored_count": len(restored), "products": restored,
+                      "pending_stock_item_queue": env["tally.sync.queue"].search_count([
+                          ("instance_id", "=", instance.id), ("entity", "=", "stock_item"),
+                          ("state", "=", "pending")])}
+        elif args.mode == "inspect-tally-product":
+            from odoo.addons.tally_integration.services import tally_transport, tally_xml_builder, tally_xml_parser
+            request = tally_xml_builder.build_collection_export(
+                "StockItem", company_name=instance.tally_company,
+                fetch_fields="NAME,GUID,ALTERID,MAILINGNAME,MAILINGNAME.LIST,STANDARDCOST,STANDARDPRICE,CLOSINGBALANCE")
+            endpoint = instance._tally_endpoint()
+            response = tally_transport.post_xml(
+                endpoint["url"], request, auth=endpoint["auth"],
+                extra_headers=endpoint["headers"], verify=endpoint["verify"])
+            parsed = tally_xml_parser.parse_stock_items_from_xml(
+                tally_xml_parser.parse_tally_xml_root(response))
+            matches = [row for row in parsed if row["name"] == args.product_name]
+            result = {"product": args.product_name, "match_count": len(matches),
+                      "tally": matches[0] if matches else None}
+            if args.price is not None:
+                result["matches_requested_price"] = bool(
+                    matches and abs(matches[0]["sale_price"] - args.price) < 0.0001)
+        elif args.mode == "set-odoo-price":
+            if args.price is None:
+                raise SystemExit("--price is required for set-odoo-price")
+            product = env["product.product"].search([
+                ("name", "=", args.product_name),
+            ], limit=1)
+            if not product:
+                raise SystemExit(f"Product not found in Odoo: {args.product_name}")
+            before = float(product.list_price)
+            product.product_tmpl_id.write({"list_price": args.price})
+            cr.commit()
+            queue = env["tally.sync.queue"].search([
+                ("instance_id", "=", instance.id), ("entity", "=", "stock_item"),
+                ("odoo_model_name", "=", product._name), ("odoo_res_id", "=", product.id),
+            ])
+            result = {"product": product.name, "odoo_price_before": before,
+                      "odoo_price_after": float(product.list_price),
+                      "stock_item_queue_count": len(queue),
+                      "queue_states": sorted(queue.mapped("state"))}
+        elif args.mode == "inspect-product":
+            product = env["product.product"].search([
+                ("name", "=", args.product_name),
+            ], limit=1)
+            result = {
+                "product": product.name if product else args.product_name,
+                "exists": bool(product),
+                "odoo_price": float(product.list_price) if product else None,
+                "odoo_cost": float(product.standard_price) if product else None,
+                "odoo_code": product.default_code if product else None,
+                "product_count": env["product.product"].search_count([
+                    ("name", "=like", f"{PREFIX} %")]),
+                "queue_count": env["tally.sync.queue"].search_count([
+                    ("instance_id", "=", instance.id)]),
+                "mapping_count": env["tally.mapping"].search_count([
+                    ("instance_id", "=", instance.id)]),
+                "sync_log_error_count": env["tally.sync.log"].search_count([
+                    ("instance_id", "=", instance.id), ("status", "=", "error")]),
+            }
+            if args.price is not None:
+                result["matches_requested_price"] = bool(
+                    product and abs(product.list_price - args.price) < 0.0001)
+        elif args.mode == "alter-product":
+            if args.price is None:
+                raise SystemExit("--price is required for alter-product")
+            from odoo.addons.tally_integration.services import tally_transport, tally_xml_builder
+            product = env["product.product"].search([
+                ("name", "=", args.product_name),
+            ], limit=1)
+            if not product:
+                raise SystemExit(f"Product not found in Odoo: {args.product_name}")
+            mapping = env["tally.mapping"].search([
+                ("instance_id", "=", instance.id), ("entity", "=", "stock_item"),
+                ("odoo_model_name", "=", product._name), ("odoo_res_id", "=", product.id),
+            ], limit=1)
+            if not mapping or not mapping.tally_guid:
+                raise SystemExit(f"No Tally stock-item identity for: {args.product_name}")
+            message = tally_xml_builder.build_stock_item_xml(
+                name=product.name,
+                base_uom=tally_xml_builder.normalize_tally_uom(product.uom_id.name),
+                parent_group=product.categ_id.name,
+                hsn_code=getattr(product, "l10n_in_hsn_code", None),
+                standard_cost=product.standard_price,
+                sale_price=args.price,
+                guid=mapping.tally_guid,
+                part_no=product.default_code,
+                barcode=product.barcode,
+                effective_date=args.effective_date,
+            ).replace('ACTION="Create"', 'ACTION="Alter"', 1)
+            payload = tally_xml_builder.wrap_import_envelope(
+                [message], company_name=instance.tally_company)
+            endpoint = instance._tally_endpoint()
+            response = tally_transport.post_xml(
+                endpoint["url"], payload, auth=endpoint["auth"],
+                extra_headers=endpoint["headers"], verify=endpoint["verify"])
+            result = tally_transport.parse_import_response(response)
+            result.update({"product": product.name, "odoo_price_before_pull": product.list_price,
+                           "requested_tally_price": args.price,
+                           "effective_date": args.effective_date,
+                           "tally_guid": mapping.tally_guid})
+            if result["errors"] or not (result["altered"] or result["combined"]):
+                raise SystemExit(json.dumps(result, indent=2))
+        elif args.mode == "seed":
             seeded = seed(env, instance)
             cr.commit()
             result = snapshot(env, instance, args.expected)
@@ -337,11 +615,21 @@ def main():
             instance._direct_dispatch_queue(limit=500, batch_size=20)
             cr.commit()
             result = snapshot(env, instance, args.expected)
+        elif args.mode == "pull":
+            pulled = instance._direct_pull(include_vouchers=True)
+            cr.commit()
+            result = {"pulled": pulled, "mapping_count": env["tally.mapping"].search_count([
+                ("instance_id", "=", instance.id)]), "log_errors": env["tally.sync.log"].search_count([
+                    ("instance_id", "=", instance.id), ("status", "=", "error")])}
         elif args.mode == "snapshot":
             result = snapshot(env, instance, args.expected)
         else:
             result = verify(env, instance, args.expected)
-        print(json.dumps(result, indent=2, default=str))
+        rendered = json.dumps(result, indent=2, default=str)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(rendered + "\n")
+        print(rendered)
 
 
 if __name__ == "__main__":

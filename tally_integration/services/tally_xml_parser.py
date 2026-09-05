@@ -231,18 +231,25 @@ def parse_stock_items_from_xml(root):
         cl_qty = _clean_float(s, "CLOSINGBALANCE", 0.0)
         op_rate = _clean_float(s, "OPENINGRATE", 0.0)
         cl_rate = _clean_float(s, "CLOSINGRATE", 0.0)
+        standard_cost = _clean_float(s, "STANDARDCOST", 0.0)
+        standard_price = _clean_float(s, "STANDARDPRICE", 0.0)
         op_val = abs(_clean_float(s, "OPENINGVALUE", 0.0))
         cl_val = abs(_clean_float(s, "CLOSINGVALUE", 0.0))
 
-        rate = cl_rate or op_rate
+        rate = standard_cost or cl_rate or op_rate
         if not rate and op_qty and op_val:
             rate = op_val / op_qty
         elif not rate and cl_qty and cl_val:
             rate = cl_val / cl_qty
 
-        on_hand_qty = cl_qty if cl_qty != 0.0 else op_qty
+        # Zero is a valid closing balance. Fall back to opening balance only
+        # when Tally omitted CLOSINGBALANCE altogether.
+        on_hand_qty = cl_qty if s.find("CLOSINGBALANCE") is not None else op_qty
 
-        barcode = _clean_text(s, "BARCODE") or _clean_text(s, "PARTNO") or _clean_text(s, "MAILINGNAME")
+        mailing = s.find(".//MAILINGNAME")
+        part_no = (_clean_text(s, "PARTNO") or
+                   (mailing.text.strip() if mailing is not None and mailing.text else ""))
+        barcode = _clean_text(s, "BARCODE")
         if barcode == name:
             barcode = ""
 
@@ -266,11 +273,13 @@ def parse_stock_items_from_xml(root):
             "base_uom": _clean_text(s, "BASEUNITS", "Nos"),
             "hsn_code": _clean_text(s, "HSNCODE", "") or _clean_text(s, "HSNDESCRIPTION", ""),
             "barcode": barcode,
+            "part_no": part_no,
             "description": _clean_text(s, "DESCRIPTION", ""),
             "opening_balance": op_qty,
             "closing_balance": cl_qty,
             "quantity": on_hand_qty,
             "rate": rate,
+            "sale_price": standard_price,
             "opening_value": op_val,
             "closing_value": cl_val,
             "batch_allocations": batch_allocations,
@@ -327,7 +336,8 @@ def _parse_single_voucher_element(v):
 
     # Parse Ledger Entries
     ledger_entries = []
-    for le in v.findall(".//ALLLEDGERENTRIES.LIST"):
+    for le in (v.findall(".//ALLLEDGERENTRIES.LIST") +
+               v.findall(".//LEDGERENTRIES.LIST")):
         led_name = _clean_text(le, "LEDGERNAME")
         if not led_name:
             continue
@@ -359,12 +369,20 @@ def _parse_single_voucher_element(v):
 
     # Parse Inventory Entries
     inventory_entries = []
-    for ie in v.findall(".//ALLINVENTORYENTRIES.LIST"):
+    inventory_nodes = [(ie, None) for ie in v.findall(".//ALLINVENTORYENTRIES.LIST")]
+    # Tally's Stock Journal export uses IN for source/consumption and OUT for
+    # destination/production. Quantities are unsigned, so preserve direction
+    # explicitly for the Odoo internal-transfer importer.
+    inventory_nodes += [(ie, -1) for ie in v.findall(".//INVENTORYENTRIESIN.LIST")]
+    inventory_nodes += [(ie, 1) for ie in v.findall(".//INVENTORYENTRIESOUT.LIST")]
+    for ie, direction in inventory_nodes:
         item_name = _clean_text(ie, "STOCKITEMNAME")
         if not item_name:
             continue
         amt = _clean_float(ie, "AMOUNT", 0.0)
         qty = _clean_float(ie, "ACTUALQTY", 0.0) or _clean_float(ie, "BILLEDQTY", 0.0)
+        if direction:
+            qty = abs(qty) * direction
         rate = _clean_float(ie, "RATE", 0.0)
         disc = _clean_float(ie, "DISCOUNT", 0.0)
         gst_rate = (

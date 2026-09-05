@@ -64,6 +64,8 @@ class AccountAccount(models.Model):
                 parent=parent_group,
                 currency=self.currency_id.name if self.currency_id else "INR",
                 guid=guid,
+                affects_stock=self.account_type in (
+                    "income", "income_other", "expense", "expense_direct_cost"),
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company)

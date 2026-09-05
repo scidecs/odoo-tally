@@ -8,6 +8,7 @@ from . import tally_entity_config
 from . import tally_mapping
 from . import tally_sync_log
 from . import tally_sync_queue
+from . import tally_inbound_dead_letter
 from . import tally_discovered_company
 from . import account_move
 from . import account_payment

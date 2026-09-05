@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Outbound event hooks on product.template for syncing stock items to Tally."""
 import logging
-from odoo import api, models
+from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
@@ -58,8 +58,11 @@ class ProductTemplate(models.Model):
                 })
             guid = self.env["tally.mapping"].outbound_guid(
                 instance, "stock_item", identity._name, identity.id)
-            uom_name = self.uom_id.name if self.uom_id else "Nos"
-            base_uom = "Nos" if uom_name in ("Units", "Unit(s)", "Nos", "Unit") else uom_name
+            base_uom = tally_xml_builder.normalize_tally_uom(
+                self.uom_id.name if self.uom_id else "Nos")
+            rate_date = fields.Date.context_today(self)
+            if instance.tally_educational_mode:
+                rate_date = rate_date.replace(day=1)
             msg_xml = tally_xml_builder.build_stock_item_xml(
                 name=self.name,
                 base_uom=base_uom,
@@ -68,6 +71,9 @@ class ProductTemplate(models.Model):
                 standard_cost=self.standard_price,
                 sale_price=self.list_price,
                 guid=guid,
+                part_no=identity.default_code,
+                barcode=identity.barcode,
+                effective_date=rate_date,
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company)

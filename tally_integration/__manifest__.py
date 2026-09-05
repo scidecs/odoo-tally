@@ -9,14 +9,14 @@ Tally Prime ⇄ Odoo 19 Integration
 A single native module for near-real-time, two-way synchronization between TallyPrime
 and Odoo 19 (Odoo.sh / On-Premise). Tally is the default source of truth, configurable per entity.
 
-- Complete Master Data Sync: Groups, General Accounts, Parties (Customers/Vendors with Indian GST),
-  Units of Measure, Stock Groups, Stock Items, Godowns/Locations, Cost Centres, Taxes, Currencies.
-- Complete Transaction Sync: Sales Invoices, Credit Notes, Purchase Bills, Debit Notes,
-  Customer Receipts, Vendor Payments with Bill-by-Bill Allocations, Journal Vouchers, Contra Vouchers.
-- Configurable Source of Truth: Tally-first, Odoo-first, or Bidirectional with Last-Write-Wins and
-  SHA-256 Echo / Loop Suppression.
-- Outbound queue + token-authenticated agent controllers for the on-prem Sync Agent.
-- Native Odoo UI dashboards: list / pivot / graph for sync monitoring.
+* Supported master data: groups, general accounts, parties, units of measure, stock groups,
+  stock items, godowns/locations, cost centres, taxes, and currencies.
+* Supported transactions: sales invoices, credit notes, purchase bills, debit notes,
+  receipts, payments, journal/contra vouchers, and internal stock transfers.
+* Configurable source of truth: Tally-first, Odoo-first, or bidirectional with serialized
+  processing and SHA-256 echo/loop suppression.
+* Outbound queue and token-authenticated controllers for the optional on-prem sync agent.
+* Native Odoo list, pivot, and graph views for synchronization monitoring.
 """,
     "version": "19.0.1.1.0",
     "category": "Accounting",
@@ -35,6 +35,7 @@ and Odoo 19 (Odoo.sh / On-Premise). Tally is the default source of truth, config
         "views/tally_mapping_views.xml",
         "views/tally_sync_log_views.xml",
         "views/tally_sync_queue_views.xml",
+        "views/tally_inbound_dead_letter_views.xml",
         "views/tally_account_type_map_views.xml",
         "views/tally_discovered_company_views.xml",
         "views/res_config_settings_views.xml",

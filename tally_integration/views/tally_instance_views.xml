@@ -36,6 +36,10 @@
                             string="Sync Now" icon="fa-refresh" class="btn-primary"
                             invisible="connection_mode != 'direct'"
                             groups="tally_integration.group_tally_manager"/>
+                    <button name="action_retry_quarantined" type="object"
+                            string="Retry Quarantined" icon="fa-life-ring"
+                            invisible="quarantine_count == 0"
+                            groups="tally_integration.group_tally_manager"/>
                     <button name="action_pull_now" type="object"
                             string="Pull Now (Masters + Vouchers)" icon="fa-cloud-download"
                             invisible="connection_mode != 'direct'"
@@ -83,6 +87,11 @@
                                 invisible="orphan_count == 0">
                             <field name="orphan_count" widget="statinfo" string="Orphans"/>
                         </button>
+                        <button name="action_view_quarantine" type="object"
+                                class="oe_stat_button" icon="fa-ban"
+                                invisible="quarantine_count == 0">
+                            <field name="quarantine_count" widget="statinfo" string="Quarantined"/>
+                        </button>
                         <button name="action_view_logs" type="object"
                                 class="oe_stat_button" icon="fa-check">
                             <field name="synced_today" widget="statinfo" string="Synced Today"/>
@@ -112,8 +121,10 @@
                             <field name="odoo_role"/>
                             <field name="connection_mode"/>
                             <field name="tally_inventory"/>
+                            <field name="tally_educational_mode"/>
                             <field name="sync_automated_valuation_stock"
                                    invisible="tally_inventory != 'with_inventory'"/>
+                            <field name="inbound_quarantine_threshold"/>
                             <field name="default_source"/>
                             <field name="poll_interval"/>
                             <field name="auto_post"/>
