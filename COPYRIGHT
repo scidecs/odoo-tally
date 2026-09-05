@@ -1,0 +1,8 @@
+Copyright 2026 Scidecs
+
+The Odoo–TallyPrime integration source in this repository is distributed under the GNU Lesser
+General Public License version 3. See LICENSE and the `license` field in
+`tally_integration/__manifest__.py`.
+
+Tally and TallyPrime are trademarks of their respective owner. Odoo is a trademark of Odoo S.A.
+The connector is independently developed by Scidecs.

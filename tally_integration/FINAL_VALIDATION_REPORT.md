@@ -90,7 +90,7 @@ Final clean Odoo 19 install on database `odootally_test_final`:
 - Python compilation: passed.
 - All addon XML files: well formed.
 - Git whitespace/error check: passed.
-- Seven standalone XML/parser tests: passed.
+- Eight standalone XML/parser tests: passed.
 - Odoo module install and registry load: passed.
 - 20 post-install test methods / 22 Odoo framework test counts: **0 failed, 0 errors**.
 
@@ -105,8 +105,8 @@ are the exercised failure path, not test failures.
 
 ## 4. Live Tally round-trip evidence
 
-Live endpoint: `192.168.68.103:9000`  
-Tally company: `Scidecs Demo Pvt Ltd`  
+Live endpoint: private LAN test endpoint (redacted from the public report)<br>
+Tally company: `Scidecs Demo Pvt Ltd`<br>
 Scenario namespace: `RT260904F`
 
 The scenario created 15 industrial products across three categories, then exercised two

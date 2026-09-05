@@ -6,8 +6,12 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-ODOO_SRC = Path("/Users/vikramdewangan/Documents/Sendan/AlSheraaGroup/AlSheraaOdoo/odoo-src")
+ROOT = Path(__file__).resolve().parents[1]
+ODOO_SRC = Path(os.environ.get("ODOO_SRC", ROOT / "odoo-src")).expanduser()
+if not (ODOO_SRC / "odoo-bin").is_file():
+    raise SystemExit(
+        "Odoo source was not found. Set ODOO_SRC to the directory containing odoo-bin."
+    )
 sys.path.insert(0, str(ODOO_SRC))
 
 import odoo
@@ -384,10 +388,10 @@ def bootstrap(env):
         "name": "Scidecs Demo Tally Recovery",
         "company_id": company.id,
         "connection_mode": "direct",
-        "tally_host": "192.168.68.103",
-        "tally_port": 9000,
-        "tally_protocol": "http",
-        "tally_company": "Scidecs Demo Pvt Ltd",
+        "tally_host": os.environ.get("TALLY_HOST", "127.0.0.1"),
+        "tally_port": int(os.environ.get("TALLY_PORT", "9000")),
+        "tally_protocol": os.environ.get("TALLY_PROTOCOL", "http"),
+        "tally_company": os.environ.get("TALLY_COMPANY", "Scidecs Demo Pvt Ltd"),
         "odoo_role": "full",
         "tally_inventory": "with_inventory",
         "tally_educational_mode": True,
@@ -413,7 +417,10 @@ def main():
                                          "restore-products", "verify-tally-products"))
     parser.add_argument("--database", default="odootally_local")
     parser.add_argument("--instance-id", type=int, default=1)
-    parser.add_argument("--config", type=Path, default=ROOT / "config" / "odoo-local.conf")
+    parser.add_argument(
+        "--config", type=Path,
+        default=Path(os.environ.get("ODOO_CONFIG", ROOT / "config" / "odoo.conf")),
+    )
     parser.add_argument("--expected", type=Path,
                         default=ROOT / "artifacts" / "roundtrip_expected.json")
     parser.add_argument("--output", type=Path,

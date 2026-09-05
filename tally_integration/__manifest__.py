@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     "name": "Tally Prime Integration",
-    "summary": "Near-real-time two-way sync between TallyPrime and Odoo — "
-               "Tally as source of truth (configurable), native UI, on-prem agent.",
+    "summary": "Free, configurable two-way TallyPrime sync for Odoo 19",
     "description": """
 Tally Prime ⇄ Odoo 19 Integration
 =================================
@@ -21,8 +20,11 @@ and Odoo 19 (Odoo.sh / On-Premise). Tally is the default source of truth, config
     "version": "19.0.1.1.0",
     "category": "Accounting",
     "author": "Scidecs",
+    "maintainer": "Scidecs",
     "website": "https://www.scidecs.com",
+    "support": "hello@scidecs.com",
     "license": "LGPL-3",
+    "images": ["static/description/raw_banner.png"],
     "depends": ["base", "mail", "account", "uom", "product", "stock", "analytic"],
     "data": [
         "security/tally_security.xml",

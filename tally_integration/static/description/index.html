@@ -1,0 +1,152 @@
+<section class="container py-4">
+  <div class="text-center mb-5">
+    <img src="raw_banner.png" alt="Tally Prime Integration" class="img-fluid mb-4"/>
+    <h1 class="display-4 font-weight-bold">Tally Prime Integration</h1>
+    <p class="lead text-muted">Free, configurable Odoo 19 synchronization for TallyPrime</p>
+    <div class="mt-3">
+      <span class="badge badge-success p-2 mr-2">Free · LGPL-3</span>
+      <span class="badge badge-primary p-2 mr-2">Odoo 19</span>
+      <span class="badge badge-secondary p-2">Community &amp; Enterprise</span>
+    </div>
+  </div>
+
+  <div class="row mb-5">
+    <div class="col-lg-10 offset-lg-1">
+      <div class="p-4 border rounded bg-light">
+        <h2 class="h3">Stop entering the same transaction twice</h2>
+        <p class="mb-0">
+          Connect supported accounting and inventory data between Odoo and TallyPrime through the
+          native Tally XML gateway. Choose direct connectivity or an outbound-only local agent,
+          define direction and ownership per data type, and operate with durable queues, stable
+          identities, audit logs and inbound quarantine.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row text-center mb-5">
+    <div class="col-md-4 mb-3">
+      <div class="h-100 p-4 border rounded">
+        <h3 class="h5 text-primary">Configurable ownership</h3>
+        <p class="mb-0">Tally-owned, Odoo-owned, one-way or controlled bidirectional policy per entity.</p>
+      </div>
+    </div>
+    <div class="col-md-4 mb-3">
+      <div class="h-100 p-4 border rounded">
+        <h3 class="h5 text-primary">Recoverable delivery</h3>
+        <p class="mb-0">Stable GUIDs, idempotency keys, durable outbound work and targeted retry.</p>
+      </div>
+    </div>
+    <div class="col-md-4 mb-3">
+      <div class="h-100 p-4 border rounded">
+        <h3 class="h5 text-primary">Visible operations</h3>
+        <p class="mb-0">Native Odoo queue, mappings, logs, health indicators and poison-record quarantine.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-5">
+    <div class="col-md-6 mb-4">
+      <h2 class="h3">Supported masters</h2>
+      <ul class="list-group">
+        <li class="list-group-item">Account groups and general ledgers</li>
+        <li class="list-group-item">Customers, vendors and GST identity</li>
+        <li class="list-group-item">UoMs, stock groups and products</li>
+        <li class="list-group-item">Godowns and cost centres</li>
+        <li class="list-group-item">Currencies and percentage tax ledgers</li>
+      </ul>
+    </div>
+    <div class="col-md-6 mb-4">
+      <h2 class="h3">Supported transactions</h2>
+      <ul class="list-group">
+        <li class="list-group-item">Sales, purchases, credit and debit notes</li>
+        <li class="list-group-item">Receipts and payments</li>
+        <li class="list-group-item">Journal and contra vouchers</li>
+        <li class="list-group-item">Opening balances</li>
+        <li class="list-group-item">Internal transfers through Stock Journal</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="row mb-5">
+    <div class="col-md-6 mb-4">
+      <div class="h-100 p-4 bg-light border rounded">
+        <h2 class="h4">Direct mode</h2>
+        <p class="mb-0">
+          Odoo communicates with a securely reachable Tally gateway. Use private routing, VPN or an
+          authenticated HTTPS proxy—never expose raw Tally port 9000 publicly.
+        </p>
+      </div>
+    </div>
+    <div class="col-md-6 mb-4">
+      <div class="h-100 p-4 bg-light border rounded">
+        <h2 class="h4">Private-LAN agent mode</h2>
+        <p class="mb-0">
+          A standard-library Python agent communicates with Tally locally and Odoo through outbound
+          HTTPS. Business transformation stays centrally in Odoo.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="mb-5">
+    <h2 class="h3 text-center mb-4">Built for safe recovery</h2>
+    <div class="row">
+      <div class="col-md-6">
+        <ul>
+          <li>SHA-256 echo and repeat suppression</li>
+          <li>Per-entity AlterID watermarks</li>
+          <li>Expired agent-lease recovery</li>
+          <li>Per-record inbound database savepoints</li>
+        </ul>
+      </div>
+      <div class="col-md-6">
+        <ul>
+          <li>Inbound dead-letter quarantine and surgical retry</li>
+          <li>Multi-company access rules</li>
+          <li>One active instance per company</li>
+          <li>Database-clone environment guard</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="p-4 border rounded mb-5">
+    <h2 class="h3">Validated with a real Tally round trip</h2>
+    <p>
+      The documented release passed a clean Odoo 19 install and a real TallyPrime scenario covering
+      15 products, purchases, sales, returns, CGST/SGST, receipts, payments, a journal and an internal
+      Stock Journal transfer. Clean-database recovery, repeated-pull stability and price edits in
+      both directions were verified.
+    </p>
+    <p class="mb-0">
+      Customer UAT is still required because Tally versions, custom TDL, ledgers, fiscal settings,
+      historical data and volume differ between organizations.
+    </p>
+  </div>
+
+  <div class="alert alert-warning mb-5">
+    <h2 class="h4">Clear product boundary</h2>
+    <p class="mb-0">
+      This release does not include MRP/BOM, landed costs, fixed assets, procurement/order logistics,
+      payroll, government IRN generation, E-Way Bill submission, GSTR filing or portal reconciliation.
+    </p>
+  </div>
+
+  <div class="text-center p-5 bg-light border rounded">
+    <h2 class="h3">Free software. Optional expert services.</h2>
+    <p>
+      The complete connector is free under LGPL-3 with no mandatory paid activation. Scidecs offers
+      optional readiness, secure deployment, mapping, migration, UAT, training, support and custom
+      development for organizations that want accountable delivery.
+    </p>
+    <a class="btn btn-primary btn-lg" href="mailto:hello@scidecs.com">Contact Scidecs</a>
+  </div>
+
+  <div class="text-center text-muted mt-5">
+    <p>
+      Independently developed by Scidecs. Tally and TallyPrime are trademarks of their respective
+      owner. Odoo is a trademark of Odoo S.A.
+    </p>
+  </div>
+</section>

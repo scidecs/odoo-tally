@@ -1,0 +1,13 @@
+[options]
+admin_passwd = change-me
+db_host = 127.0.0.1
+db_port = 5432
+db_user = odoo
+db_password = change-me
+addons_path = /path/to/odoo-tally,/path/to/odoo-src/addons
+data_dir = /path/to/odoo-data
+http_port = 8069
+http_interface = 127.0.0.1
+workers = 0
+log_level = info
+list_db = False

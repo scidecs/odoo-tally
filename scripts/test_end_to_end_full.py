@@ -6,8 +6,12 @@ import sys
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-ODOO_SRC = Path("/Users/vikramdewangan/Documents/Sendan/AlSheraaGroup/AlSheraaOdoo/odoo-src")
+ROOT = Path(__file__).resolve().parents[1]
+ODOO_SRC = Path(os.environ.get("ODOO_SRC", ROOT / "odoo-src")).expanduser()
+if not (ODOO_SRC / "odoo-bin").is_file():
+    raise SystemExit(
+        "Odoo source was not found. Set ODOO_SRC to the directory containing odoo-bin."
+    )
 sys.path.insert(0, str(ODOO_SRC))
 
 import odoo
@@ -36,8 +40,9 @@ def run_test():
     print("STARTING LIVE END-TO-END TEST ON REAL TALLY SERVER (NO MOCKS)")
     print("=" * 70)
 
-    db_name = "odootally_local"
-    odoo.tools.config.parse_config(["-c", str(ROOT / "config" / "odoo-local.conf"), "-d", db_name, "--no-http"])
+    db_name = os.environ.get("ODOO_DATABASE", "odootally_local")
+    config_path = Path(os.environ.get("ODOO_CONFIG", ROOT / "config" / "odoo.conf"))
+    odoo.tools.config.parse_config(["-c", str(config_path), "-d", db_name, "--no-http"])
     registry = Registry(db_name)
 
     with registry.cursor() as cr:

@@ -1,6 +1,6 @@
 # Odoo Tally Integration — Verified Implementation Status
 
-Last updated: 2026-09-04
+Last updated: 2026-09-05
 
 This file is the release-scope ledger. A feature is marked verified only when executable code
 and an applicable automated or live test exist. Marketing checklists must not expand the product
@@ -12,18 +12,19 @@ boundary without adding the required Odoo dependency, implementation, and tests.
 |---|---|---|---|
 | Account groups and general ledgers | Tally → Odoo; accounts Odoo → Tally | Implemented | Fresh Odoo 19 install; XML tests |
 | Party ledgers and GST identity | Both | Implemented | XML round-trip; Odoo engine tests |
-| Units, stock groups, items, godowns, cost centres | Tally → Odoo | Implemented | Parser/build tests; fresh install |
+| Units, stock groups, items, godowns, cost centres | Both where configured | Implemented | Parser/build tests; fresh install; live products/transfer |
 | Products and stock items | Both | Implemented | XML round-trip; Odoo engine tests |
 | Opening balances | Tally → Odoo | Implemented | Balanced journal implementation; Odoo transactional test |
-| Sales, purchases, credit/debit notes | Both where configured | Implemented | Invoice total regression; live Tally evidence remains deployment-specific |
+| Sales, purchases, credit/debit notes | Both where configured | Implemented | Invoice total regression; live Tally round trip |
 | Receipts and payments | Both where configured | Implemented | Odoo outbound queue test; bill allocation paths |
 | Journal and contra vouchers | Both / inbound as configured | Implemented | Balanced-entry logic; Odoo load validation |
-| Stock Journal internal transfers | Tally → Odoo | Implemented | Odoo 19 transactional test; requires client UAT |
+| Stock Journal internal transfers | Both where configured | Implemented | Odoo 19 transactional test; native live Tally import/export |
 | GST ledger and per-item rate mapping | Tally → Odoo | Implemented | Parser tests; mixed-rate allocation logic |
 | Direct gateway transport | Both | Implemented | Existing live connection plus isolated install |
 | On-premise agent fallback | Both | Implemented | Entity-specific polling, voucher routing, leased queue recovery |
 | Multi-company isolation | Both | Implemented | Company fields, ACLs, record rules, per-instance identity |
 | Monitoring, retries, deletion reconciliation | Both | Implemented | Native views, crons, queue state machine |
+| Inbound poison-record quarantine and targeted retry | Tally → Odoo | Implemented | Dedicated dead-letter model; threshold/retry/echo-resolution tests |
 
 ## Explicitly outside this addon's scope
 
@@ -47,9 +48,14 @@ The repository currently passes:
 1. Python compilation, XML well-formedness, and manifest validation.
 2. Eight standalone XML/parser regression tests.
 3. Fresh Odoo 19 installation on an isolated database.
-4. Thirteen Odoo transactional engine tests covering failed-watermark safety, workflow echo
-   suppression, stable identity, ownership policy, inventory-invoice amount fidelity, opening
-   balance integrity, and stock-journal transfer creation.
+4. Twenty Odoo post-install test methods (22 framework counts), with zero failures and zero errors,
+   covering failed-watermark safety, quarantine and targeted retry, echo suppression, stable identity,
+   ownership policy, inventory-invoice fidelity, opening balances, stock idempotency, product queue
+   deduplication, dated rates and Stock Journal transfer creation.
+5. Real TallyPrime round trip covering 15 products, purchases, sales, both returns, CGST/SGST,
+   receipt, payment, journal and internal transfer.
+6. Fresh-database recovery, repeat-pull idempotency, and verified/restored price edits in both
+   directions.
 
 A customer deployment is complete only after UAT against that customer's TallyPrime release,
 voucher configurations, GST ledgers, security proxy, fiscal periods, and representative data.
