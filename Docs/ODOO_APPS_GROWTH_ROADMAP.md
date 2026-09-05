@@ -47,10 +47,11 @@ quality scores.
 
 ### Current conversion gaps
 
-1. The 400 x 400 square banner is enlarged into a landscape slot and does not communicate the product
-   outcome at a glance.
-2. The description opens with the same logo artwork instead of an outcome-led visual hero.
-3. There are no real product screenshots, annotated workflows or architecture illustrations.
+1. The original 400 x 400 banner did not communicate the product outcome at a glance; it has now
+   been replaced by a 1600 x 800 landscape integration cover.
+2. The description previously opened with logo artwork; it now opens with an outcome-led hero.
+3. The original listing had no product screenshots; the source now contains 28 sanitized Odoo 19
+   interface and synchronized-result screenshots awaiting the next Apps scan.
 4. The page is mostly text and Bootstrap cards; visual rhythm and evidence density are low.
 5. There is no short demonstration video.
 6. There are no genuine ratings, customer quotations or case studies yet.
@@ -220,12 +221,12 @@ titles and Scidecs website pages to cover supporting vocabulary.
 
 ### Phase 1 - conversion-ready listing
 
-- [ ] Design the landscape store cover and description hero.
-- [ ] Capture and sanitize the five P0 Odoo interface screenshots.
+- [x] Design the landscape store cover and description hero.
+- [x] Capture and sanitize 28 Odoo interface and business-result screenshots, exceeding the five P0 views.
 - [ ] Produce architecture and supported-data diagrams.
-- [ ] Rebuild `static/description/index.html` around the recommended narrative.
+- [x] Rebuild `static/description/index.html` around the recommended narrative and full product tour.
 - [ ] Validate desktop and mobile readability in the live Apps preview.
-- [ ] Re-run Odoo installation and publication checks.
+- [x] Re-run publication checks and standalone tests after the visual rebuild.
 
 Exit criterion: the page explains value, scope, operation and proof visually before the FAQ.
 
@@ -281,6 +282,7 @@ Before pushing the new page:
 
 - Every claim maps to shipped behavior or named validation evidence.
 - Every screenshot comes from the current Odoo 19 build and contains synthetic data.
+- TallyPrime desktop evidence follows `Docs/TALLY_SCREENSHOT_CAPTURE_GUIDE.md` and is never mocked.
 - No private IP, credential, GSTIN, customer or personal path appears.
 - No prohibited external link, JavaScript, widget, modal or external asset appears.
 - Images load locally, include useful alt text and remain legible on mobile.

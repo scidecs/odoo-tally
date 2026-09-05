@@ -193,6 +193,9 @@ different hidden edition of the connector. See [Support and Consulting](Docs/SUP
 
 | Document | Audience | Purpose |
 |---|---|---|
+| [Complete Feature Catalog](Docs/FEATURE_CATALOG.md) | Buyers, implementers, support, developers | Canonical 20-entity, UI, operations, reliability and security inventory |
+| [Screenshot Catalog](Docs/SCREENSHOT_CATALOG.md) | Release, sales, support | Provenance and purpose of every published product image |
+| [Tally Screenshot Capture Guide](Docs/TALLY_SCREENSHOT_CAPTURE_GUIDE.md) | QA, release manager | Sanitized TallyPrime desktop evidence checklist |
 | [Architecture](Docs/ARCHITECTURE.md) | Architects, technical leads | End-to-end components, flows and failure design |
 | [Technical Reference](Docs/TECHNICAL_REFERENCE.md) | Developers, reviewers | Models, APIs, entities, XML, hooks and extension rules |
 | [Installation and Operations](Docs/INSTALLATION_AND_OPERATIONS.md) | Implementers, administrators | Installation, configuration, runbooks and recovery |

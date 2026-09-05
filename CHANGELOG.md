@@ -13,6 +13,12 @@ All notable public changes to the Scidecs Odoo–TallyPrime integration are docu
 
 - Added a live-listing benchmark, visual redesign sequence, Odoo-compliant promotion boundary,
   Scidecs domain-authority strategy and phased growth measurement plan.
+- Added the canonical 20-entity feature catalog, screenshot provenance catalog and a secure
+  TallyPrime desktop capture checklist.
+- Rebuilt the Odoo Apps description as a complete visual product tour using 28 sanitized Odoo 19
+  screenshots, a landscape cover, exhaustive capability matrix and honest product boundary.
+- Extended release checks to reject broken store images, missing alt text, scripts, external image
+  assets, private filesystem paths and legacy project references.
 
 ## 19.0.1.1.0 — 2026-09-05
 

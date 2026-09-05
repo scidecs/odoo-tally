@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage checks: Python compile + XML well-formedness + manifest sanity.
+# Stage checks: code, XML, manifest, store assets and publication hygiene.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MOD="$ROOT/tally_integration"
@@ -41,11 +41,56 @@ assert (__import__("pathlib").Path(sys.argv[2]) / "static/description/index.html
 print("  manifest OK:", d["name"], d["version"])
 PY
 
+echo "== Store description =="
+python3 - "$MOD/static/description/index.html" <<'PY' || fail=1
+from html.parser import HTMLParser
+from pathlib import Path
+import sys
+from urllib.parse import urlparse
+
+index = Path(sys.argv[1])
+
+class StoreParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.images = []
+        self.scripts = 0
+        self.external_assets = []
+
+    def handle_starttag(self, tag, attrs):
+        values = dict(attrs)
+        if tag == "script":
+            self.scripts += 1
+        if tag == "img":
+            self.images.append(values)
+            src = values.get("src", "")
+            if urlparse(src).scheme or src.startswith("//"):
+                self.external_assets.append(src)
+
+parser = StoreParser()
+parser.feed(index.read_text(encoding="utf-8"))
+assert not parser.scripts, "store description must not contain JavaScript"
+assert not parser.external_assets, f"external image assets are not allowed: {parser.external_assets}"
+assert parser.images, "store description has no images"
+for image in parser.images:
+    src = image.get("src")
+    assert src, "image is missing src"
+    assert image.get("alt", "").strip(), f"image is missing useful alt text: {src}"
+    assert (index.parent / src).is_file(), f"store image is missing: {src}"
+print(f"  {len(parser.images)} local images, all present with alt text; no scripts")
+PY
+
 echo "== Publication hygiene =="
-if grep -Rni --exclude-dir=.git --exclude='*.pyc' --exclude='*.png' 'Sen''dan' "$ROOT"; then
+if grep -Rni --exclude-dir=.git --exclude='*.pyc' --exclude='*.png' --exclude='*.jpg' 'Sen''dan' "$ROOT"; then
     echo "  FAIL found legacy customer reference"; fail=1
 else
     echo "  no legacy customer references"
+fi
+if grep -RniE --exclude='*.png' --exclude='*.jpg' '(Sh''ory|/Users/[^/[:space:]]+)' \
+    "$MOD/static/description" "$ROOT/Docs" "$ROOT/README.md"; then
+    echo "  FAIL found private path or legacy project reference in public content"; fail=1
+else
+    echo "  no private paths or legacy project references in public content"
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL STAGE CHECKS PASSED" || { echo "STAGE CHECKS FAILED"; exit 1; }

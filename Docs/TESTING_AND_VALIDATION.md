@@ -21,8 +21,9 @@ the tested scope and dataset.
 python3 -m pytest -q tests
 ```
 
-The stage script compiles Python, parses every addon XML file, validates key manifest fields and
-confirms every manifest data file exists.
+The stage script compiles Python, parses every addon XML file, validates key manifest fields,
+confirms every manifest data file exists, and checks the Apps description for missing local images,
+missing alt text, external image assets and JavaScript.
 
 ## 3. Odoo transactional test command
 

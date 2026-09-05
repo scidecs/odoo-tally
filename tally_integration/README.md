@@ -14,6 +14,8 @@ customization services are available from Scidecs; no paid activation is require
 ## Start here
 
 - [Repository overview](../README.md)
+- [Complete feature catalog](../Docs/FEATURE_CATALOG.md)
+- [Screenshot catalog](../Docs/SCREENSHOT_CATALOG.md)
 - [Architecture](../Docs/ARCHITECTURE.md)
 - [Technical reference](../Docs/TECHNICAL_REFERENCE.md)
 - [Installation and operations](../Docs/INSTALLATION_AND_OPERATIONS.md)
@@ -21,6 +23,7 @@ customization services are available from Scidecs; no paid activation is require
 - [FAQ](../Docs/FAQ.md)
 - [Support model](../Docs/SUPPORT_AND_CONSULTING.md)
 - [Odoo Apps publishing checklist](../Docs/ODOO_APPS_PUBLISHING.md)
+- [TallyPrime screenshot capture guide](../Docs/TALLY_SCREENSHOT_CAPTURE_GUIDE.md)
 - [Final validation report](FINAL_VALIDATION_REPORT.md)
 
 ## Supported entities

@@ -54,9 +54,13 @@ mix code for another Odoo major version into `19.0`.
 - [x] Accurate supported/excluded scope.
 - [x] Free-license and optional-support model stated factually.
 - [x] Local icon and banner.
-- [ ] Add real sanitized UI screenshots before store submission if available.
+- [x] Added 28 sanitized Odoo 19 UI screenshots covering every connector view and key synchronized results.
 - [ ] Render and inspect the page in the Apps preview.
-- [ ] Confirm no broken local image references.
+- [x] Confirmed all 29 local image references exist and every image has descriptive alt text.
+
+TallyPrime desktop screenshots remain a separate evidence task because they require authorized
+access to the Windows host. Follow `Docs/TALLY_SCREENSHOT_CAPTURE_GUIDE.md`; never substitute a
+mockup for a real Tally screen.
 
 Do not put competitor comparisons in the store page. Keep the dated, source-based comparison in
 `Docs/PRODUCT_AND_MARKETING.md`.
