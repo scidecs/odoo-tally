@@ -202,6 +202,7 @@ different hidden edition of the connector. See [Support and Consulting](Docs/SUP
 | [FAQ](Docs/FAQ.md) | Sales, support, customers | Client-ready functional and technical answers |
 | [Support and Consulting](Docs/SUPPORT_AND_CONSULTING.md) | Customers, delivery teams | Free/paid boundary and engagement model |
 | [Odoo Apps Publishing](Docs/ODOO_APPS_PUBLISHING.md) | Release manager | Store assets, manifest, branch and submission checklist |
+| [Odoo Apps Growth Roadmap](Docs/ODOO_APPS_GROWTH_ROADMAP.md) | Product, design, marketing | Listing benchmark, visual redesign, compliant authority and measurement plan |
 | [Implementation Status](Docs/IMPLEMENTATION_STATUS.md) | All reviewers | Honest supported boundary and release gates |
 | [Roadmap](Docs/ROADMAP.md) | Product and engineering | Completed capabilities and future hardening |
 | [Changelog](CHANGELOG.md) | All users | Versioned public feature and correction history |

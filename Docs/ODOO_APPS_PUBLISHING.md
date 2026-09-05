@@ -147,3 +147,6 @@ Avoid:
 - Upstream reusable fixes with regression tests.
 - Never diagnose from unrestricted customer backups in a public issue.
 - Revalidate the Apps guidelines before each major publication.
+
+For the listing redesign, conversion plan and compliant Scidecs authority strategy, follow
+[Odoo Apps Growth and Listing Redesign Roadmap](ODOO_APPS_GROWTH_ROADMAP.md).

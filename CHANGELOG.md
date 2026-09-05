@@ -2,6 +2,18 @@
 
 All notable public changes to the Scidecs Odoo–TallyPrime integration are documented here.
 
+## Unreleased
+
+### Corrected
+
+- Replaced affected punctuation in the Odoo Apps description with safe HTML entities after the live
+  page exposed character-encoding corruption.
+
+### Documentation
+
+- Added a live-listing benchmark, visual redesign sequence, Odoo-compliant promotion boundary,
+  Scidecs domain-authority strategy and phased growth measurement plan.
+
 ## 19.0.1.1.0 — 2026-09-05
 
 ### Added
