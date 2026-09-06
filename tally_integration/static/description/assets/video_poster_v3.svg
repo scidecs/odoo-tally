@@ -1,13 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1680" height="900" viewBox="0 0 1680 900">
-  <defs><filter id="s" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#090F30" flood-opacity=".28"/></filter><clipPath id="l"><rect x="70" y="220" width="748" height="470" rx="20"/></clipPath><clipPath id="r"><rect x="862" y="220" width="748" height="470" rx="20"/></clipPath></defs>
-  <rect width="1680" height="900" rx="28" fill="#0D1738"/><circle cx="80" cy="820" r="270" fill="#123F58"/><circle cx="1590" cy="70" r="240" fill="#242453"/>
-  <text x="840" y="80" text-anchor="middle" fill="#5FE0D2" font-family="Arial, sans-serif" font-size="18" font-weight="700" letter-spacing="4">REAL SYSTEMS • REAL SYNC • REAL EVIDENCE</text>
-  <text x="840" y="145" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="52" font-weight="800">Watch Odoo and TallyPrime work side by side</text>
-  <g filter="url(#s)"><rect x="70" y="220" width="748" height="470" rx="20" fill="white"/><image href="../screenshots/17_entity_configuration.jpg" x="70" y="220" width="748" height="470" preserveAspectRatio="xMidYMid slice" clip-path="url(#l)"/>
-    <rect x="862" y="220" width="748" height="470" rx="20" fill="white"/><image href="../screenshots/tally/tally_07_stock_item_detail.jpg" x="862" y="220" width="748" height="470" preserveAspectRatio="xMidYMid slice" clip-path="url(#r)"/></g>
-  <rect x="70" y="220" width="748" height="54" rx="20" fill="#714B67"/><text x="102" y="256" fill="white" font-family="Arial, sans-serif" font-size="22" font-weight="700">ODOO 19 • POLICY &amp; CONTROL</text>
-  <rect x="862" y="220" width="748" height="54" rx="20" fill="#F6C453"/><text x="894" y="256" fill="#101B44" font-family="Arial, sans-serif" font-size="22" font-weight="700">TALLYPRIME • SYNCHRONIZED RESULT</text>
-  <circle cx="840" cy="455" r="78" fill="white" filter="url(#s)"/><circle cx="840" cy="455" r="64" fill="#4B35E8"/><path d="M824 418l55 37-55 37z" fill="white"/>
-  <rect x="414" y="744" width="852" height="82" rx="41" fill="#44D0C5"/><text x="840" y="795" text-anchor="middle" fill="#08162F" font-family="Arial, sans-serif" font-size="26" font-weight="800">PLAY THE 2-MINUTE LIVE WORKFLOW  →</text>
-  <text x="840" y="861" text-anchor="middle" fill="#BAC6E2" font-family="Arial, sans-serif" font-size="18">Configuration • product sync • queue acknowledgement • Tally voucher • audit trail</text>
+  <defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="16" stdDeviation="22" flood-color="#09122F" flood-opacity=".28"/></filter></defs>
+  <rect width="1680" height="900" rx="28" fill="#101B44"/><circle cx="80" cy="840" r="245" fill="#153D55"/><circle cx="1600" cy="40" r="220" fill="#292759"/>
+  <text x="840" y="72" text-anchor="middle" fill="#62D8CD" font-family="Arial, sans-serif" font-size="18" font-weight="700" letter-spacing="3">TWO-MINUTE PRODUCT WALKTHROUGH</text>
+  <text x="840" y="132" text-anchor="middle" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="48" font-weight="800">See the same transaction in both systems</text>
+  <text x="840" y="171" text-anchor="middle" fill="#C8D1E8" font-family="Arial, sans-serif" font-size="20">Configuration, dispatch, acknowledgement and synchronized result</text>
+  <g filter="url(#shadow)"><rect x="78" y="232" width="640" height="576" rx="22" fill="#FFFFFF"/><rect x="872" y="232" width="730" height="576" rx="22" fill="#FFFFFF"/></g>
+  <rect x="78" y="232" width="640" height="62" rx="22" fill="#714B67"/><rect x="78" y="272" width="640" height="22" fill="#714B67"/>
+  <image href="odoo_logo.png" x="106" y="242" width="94" height="42" preserveAspectRatio="xMidYMid meet"/><text x="222" y="272" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="20" font-weight="700">ODOO 19 • SYNC POLICY</text>
+  <image href="../screenshots/17_entity_configuration.jpg" x="92" y="308" width="612" height="501" preserveAspectRatio="xMidYMid meet"/>
+  <rect x="872" y="232" width="730" height="62" rx="22" fill="#F4BE43"/><rect x="872" y="272" width="730" height="22" fill="#F4BE43"/>
+  <image href="tallyprime_logo.png" x="900" y="242" width="132" height="42" preserveAspectRatio="xMidYMid meet"/><text x="1057" y="272" fill="#101B44" font-family="Arial, sans-serif" font-size="20" font-weight="700">SYNCHRONIZED STOCK ITEM</text>
+  <image href="../screenshots/tally/tally_07_stock_item_detail.jpg" x="886" y="308" width="702" height="377" preserveAspectRatio="xMidYMid meet"/>
+  <rect x="906" y="716" width="662" height="62" rx="14" fill="#FFF7E8"/><text x="1237" y="742" text-anchor="middle" fill="#101B44" font-family="Arial, sans-serif" font-size="18" font-weight="700">REAL TALLYPRIME TEST ENVIRONMENT</text><text x="1237" y="765" text-anchor="middle" fill="#4F5D75" font-family="Arial, sans-serif" font-size="15">No mockups • no customer books</text>
+  <circle cx="795" cy="512" r="74" fill="#FFFFFF" filter="url(#shadow)"/><circle cx="795" cy="512" r="58" fill="#5146E5"/><path d="M781 479l48 33-48 33z" fill="#FFFFFF"/>
+  <text x="840" y="861" text-anchor="middle" fill="#C8D1E8" font-family="Arial, sans-serif" font-size="18">Product sync • GST vouchers • queue acknowledgement • logs • recovery</text>
 </svg>

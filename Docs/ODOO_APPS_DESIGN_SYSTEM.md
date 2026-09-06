@@ -30,19 +30,35 @@ implementation uses those principles without copying another publisher's artwork
 | Token | Value | Use |
 |---|---:|---|
 | Ink navy | `#101B44` | Headlines, architecture and reliability surfaces |
-| Sync teal | `#44D0C5` | Flow, success, synchronization and evidence |
-| Odoo purple | `#5A43E8` | Operations, navigation and primary accents |
-| Tally amber | `#F6C453` | Accounting, vouchers and GST accents |
-| Lavender canvas | `#F7F7FF` | Primary section background |
-| Mint canvas | `#EFFBF8` | Reliability and recovery background |
-| Warm canvas | `#FFF9EA` | Tally and accounting background |
-| Body text | `#4A5473` | Supporting copy |
+| Sync teal | `#148F84` | Flow, success, synchronization and evidence |
+| Odoo purple | `#5146E5` | Operations, navigation and primary accents |
+| Tally amber | `#E9A62B` | Accounting, vouchers and GST accents |
+| Lavender canvas | `#F5F4FF` | Primary section background |
+| Mint canvas | `#EFF9F7` | Reliability and recovery background |
+| Warm canvas | `#FFF7E8` | Tally and accounting background |
+| Slate canvas | `#F4F6FA` | Neutral technical cards |
+| Body text | `#4F5D75` | Supporting copy |
 
 The spacing rhythm is 24 pixels inside small components, 32 pixels inside large cards and 48–80
 pixels between major content groups. Large radii are reserved for section shells and screenshot
 frames; small radii are used inside those shells. The listing uses Bootstrap 4 grid, spacing,
 typography, card, badge, table and button utilities, supplemented only by restrained inline visual
 tokens. No external CSS or JS is required.
+
+Typography inherits the Odoo marketplace and Bootstrap system font stack. Use Bootstrap's `h1`,
+`h2`, `h3`, `lead`, `small`, `font-weight-bold` and `text-muted` scale instead of introducing custom
+font families or arbitrary weights. Eyebrow labels may use at most 1–3 pixels of letter spacing;
+headlines and paragraphs use normal tracking. Body copy must remain at normal or medium weight on a
+high-contrast surface.
+
+### Media geometry rule
+
+Product screenshots are evidence and must never be stretched or cropped to fill a decorative frame.
+HTML screenshots use `img-fluid`/`w-100` with automatic height. SVG compositions use
+`preserveAspectRatio="xMidYMid meet"` and frames calculated from the original source ratio. Odoo
+screens in this release are `1146 × 939`; TallyPrime screens are `1570 × 842`. Logo assets also use
+their natural aspect ratio inside a bounded container. `slice`, fixed screenshot heights and
+`object-fit: cover` are prohibited.
 
 ### Marketplace sanitizer rule
 

@@ -1,43 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1680" height="900" viewBox="0 0 1680 900">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FAFAFF"/><stop offset="1" stop-color="#EEF0FF"/></linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#243060" flood-opacity=".18"/></filter>
-    <clipPath id="screen"><rect x="736" y="152" width="856" height="526" rx="22"/></clipPath>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#101B44" flood-opacity=".16"/></filter>
+    <clipPath id="screen"><rect x="815" y="194" width="770" height="631"/></clipPath>
   </defs>
-  <rect width="1680" height="900" rx="28" fill="#F7F7FF"/>
-  <circle cx="1525" cy="98" r="220" fill="#DDD9FF" opacity=".45"/><circle cx="675" cy="805" r="210" fill="#CEF5EC" opacity=".62"/>
-  <g opacity=".24" fill="#6557FF">
-    <circle cx="1560" cy="36" r="4"/><circle cx="1582" cy="36" r="4"/><circle cx="1604" cy="36" r="4"/><circle cx="1626" cy="36" r="4"/>
-    <circle cx="1560" cy="58" r="4"/><circle cx="1582" cy="58" r="4"/><circle cx="1604" cy="58" r="4"/><circle cx="1626" cy="58" r="4"/>
-    <circle cx="1560" cy="80" r="4"/><circle cx="1582" cy="80" r="4"/><circle cx="1604" cy="80" r="4"/><circle cx="1626" cy="80" r="4"/>
-  </g>
-  <image href="scidecs_mark.png" x="54" y="43" width="46" height="46"/>
-  <text x="114" y="74" fill="#101B44" font-family="Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="5">SCIDECS CONNECT</text>
-  <rect x="54" y="128" width="218" height="38" rx="19" fill="#E7E4FF"/>
-  <text x="74" y="154" fill="#5A43E8" font-family="Arial, sans-serif" font-size="17" font-weight="700" letter-spacing="1.8">ODOO 19 × TALLYPRIME</text>
-  <text x="54" y="242" fill="#101B44" font-family="Arial, sans-serif" font-size="58" font-weight="800">Enter it once.</text>
-  <text x="54" y="307" fill="#503CE4" font-family="Arial, sans-serif" font-size="54" font-weight="800">Keep both books aligned.</text>
-  <text x="54" y="362" fill="#4A5473" font-family="Arial, sans-serif" font-size="23">Free two-way Odoo and TallyPrime synchronization</text>
-  <text x="54" y="397" fill="#4A5473" font-family="Arial, sans-serif" font-size="23">for accounting, GST, inventory and payments.</text>
+  <rect width="1680" height="900" rx="28" fill="#F5F4FF"/><rect width="18" height="900" rx="9" fill="#5146E5"/>
+  <circle cx="1572" cy="86" r="176" fill="#E5E2FF"/><circle cx="72" cy="850" r="188" fill="#DDF5F1"/>
+  <image href="scidecs_mark.png" x="62" y="52" width="46" height="46" preserveAspectRatio="xMidYMid meet"/>
+  <text x="124" y="83" fill="#101B44" font-family="Arial, sans-serif" font-size="23" font-weight="700" letter-spacing="2.5">SCIDECS CONNECT</text>
+  <rect x="62" y="145" width="246" height="42" rx="21" fill="#E5E2FF"/><text x="88" y="173" fill="#5146E5" font-family="Arial, sans-serif" font-size="17" font-weight="700" letter-spacing="1.2">ODOO 19  •  TALLYPRIME</text>
+  <text x="62" y="278" fill="#101B44" font-family="Arial, sans-serif" font-size="60" font-weight="800">Enter it once.</text>
+  <text x="62" y="347" fill="#5146E5" font-family="Arial, sans-serif" font-size="56" font-weight="800">Keep both books aligned.</text>
+  <text x="62" y="411" fill="#4F5D75" font-family="Arial, sans-serif" font-size="23">Free two-way synchronization for accounting, GST,</text><text x="62" y="446" fill="#4F5D75" font-family="Arial, sans-serif" font-size="23">inventory and payments.</text>
   <g font-family="Arial, sans-serif">
-    <circle cx="78" cy="473" r="24" fill="#E0F8F1"/><path d="M66 473l8 8 16-18" fill="none" stroke="#19A974" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="118" y="466" fill="#101B44" font-size="22" font-weight="700">Bidirectional by policy</text><text x="118" y="494" fill="#626C89" font-size="19">Choose the source of truth for every entity.</text>
-    <circle cx="78" cy="552" r="24" fill="#EEEAFE"/><path d="M64 552h28M78 538v28" stroke="#6C55ED" stroke-width="5" stroke-linecap="round"/>
-    <text x="118" y="545" fill="#101B44" font-size="22" font-weight="700">Native Tally XML</text><text x="118" y="573" fill="#626C89" font-size="19">Direct gateway or outbound private-LAN agent.</text>
-    <circle cx="78" cy="631" r="24" fill="#FFF2CF"/><path d="M68 631l7 7 14-16" fill="none" stroke="#E0A11A" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="118" y="624" fill="#101B44" font-size="22" font-weight="700">Operational evidence</text><text x="118" y="652" fill="#626C89" font-size="19">Queue, logs, retry history and quarantine.</text>
+    <rect x="62" y="505" width="316" height="78" rx="18" fill="#FFFFFF"/><circle cx="103" cy="544" r="22" fill="#DDF5F1"/><path d="M92 544l7 7 15-17" fill="none" stroke="#148F84" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><text x="140" y="538" fill="#101B44" font-size="20" font-weight="700">20 synchronized entities</text><text x="140" y="562" fill="#4F5D75" font-size="16">Masters, vouchers and stock</text>
+    <rect x="396" y="505" width="316" height="78" rx="18" fill="#FFFFFF"/><circle cx="437" cy="544" r="22" fill="#EEEAFE"/><path d="M425 544h24M437 532v24" stroke="#5146E5" stroke-width="4" stroke-linecap="round"/><text x="474" y="538" fill="#101B44" font-size="20" font-weight="700">Controlled bidirectional</text><text x="474" y="562" fill="#4F5D75" font-size="16">Ownership set per entity</text>
+    <rect x="62" y="601" width="316" height="78" rx="18" fill="#FFFFFF"/><circle cx="103" cy="640" r="22" fill="#FFF2CF"/><path d="M92 640l7 7 15-17" fill="none" stroke="#C1840D" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><text x="140" y="634" fill="#101B44" font-size="20" font-weight="700">GST-ready workflows</text><text x="140" y="658" fill="#4F5D75" font-size="16">CGST, SGST and IGST</text>
+    <rect x="396" y="601" width="316" height="78" rx="18" fill="#FFFFFF"/><circle cx="437" cy="640" r="22" fill="#E8EEF8"/><path d="M425 641l8 7 16-18" fill="none" stroke="#101B44" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><text x="474" y="634" fill="#101B44" font-size="20" font-weight="700">Live-Tally validated</text><text x="474" y="658" fill="#4F5D75" font-size="16">Fresh-database round trip</text>
   </g>
-  <rect x="54" y="700" width="266" height="58" rx="29" fill="#4B35E8" filter="url(#shadow)"/><text x="91" y="737" fill="white" font-family="Arial, sans-serif" font-size="21" font-weight="700">FREE • LGPL-3</text>
-  <rect x="736" y="152" width="856" height="526" rx="22" fill="white" filter="url(#shadow)"/>
-  <image href="../screenshots/03_instance_control_center.jpg" x="736" y="152" width="856" height="526" preserveAspectRatio="xMidYMid slice" clip-path="url(#screen)"/>
-  <rect x="736" y="152" width="856" height="526" rx="22" fill="none" stroke="#FFFFFF" stroke-width="8"/>
-  <g filter="url(#shadow)"><rect x="774" y="89" width="152" height="88" rx="24" fill="white"/><image href="odoo_logo.png" x="796" y="110" width="108" height="46" preserveAspectRatio="xMidYMid meet"/>
-    <rect x="1432" y="614" width="172" height="92" rx="24" fill="white"/><image href="tallyprime_logo.png" x="1450" y="635" width="136" height="48" preserveAspectRatio="xMidYMid meet"/></g>
-  <path d="M930 116 C1040 40 1170 54 1242 118" fill="none" stroke="#6C55ED" stroke-width="3" stroke-dasharray="7 8"/><path d="M1236 104l22 19-28 6" fill="#6C55ED"/>
-  <path d="M1418 658 C1326 744 1185 740 1110 690" fill="none" stroke="#28BFAE" stroke-width="3" stroke-dasharray="7 8"/><path d="M1120 706l-27-25 34-3" fill="#28BFAE"/>
-  <rect x="36" y="797" width="1608" height="76" rx="24" fill="white" opacity=".92"/>
-  <g font-family="Arial, sans-serif"><text x="102" y="830" fill="#101B44" font-size="19" font-weight="700">20 ENTITY TYPES</text><text x="102" y="854" fill="#69738E" font-size="16">Masters, vouchers, inventory</text>
-    <text x="502" y="830" fill="#101B44" font-size="19" font-weight="700">GST READY</text><text x="502" y="854" fill="#69738E" font-size="16">CGST, SGST and IGST</text>
-    <text x="858" y="830" fill="#101B44" font-size="19" font-weight="700">LIVE-TALLY VALIDATED</text><text x="858" y="854" fill="#69738E" font-size="16">Round-trip test evidence</text>
-    <text x="1288" y="830" fill="#101B44" font-size="19" font-weight="700">Odoo.sh + ON-PREMISE</text><text x="1288" y="854" fill="#69738E" font-size="16">Community and Enterprise</text></g>
+  <rect x="62" y="726" width="244" height="58" rx="29" fill="#5146E5"/><text x="100" y="763" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="21" font-weight="700">FREE  •  LGPL-3</text><text x="62" y="832" fill="#4F5D75" font-family="Arial, sans-serif" font-size="17">Direct XML gateway or outbound-only private-LAN agent</text>
+  <g filter="url(#shadow)"><rect x="790" y="98" width="820" height="748" rx="26" fill="#FFFFFF"/></g>
+  <rect x="790" y="98" width="820" height="88" rx="26" fill="#FFFFFF"/>
+  <image href="odoo_logo.png" x="826" y="119" width="105" height="46" preserveAspectRatio="xMidYMid meet"/><text x="966" y="151" fill="#9AA3B6" font-family="Arial, sans-serif" font-size="23" font-weight="700">↔</text><image href="tallyprime_logo.png" x="1012" y="119" width="150" height="46" preserveAspectRatio="xMidYMid meet"/><circle cx="1566" cy="142" r="7" fill="#22A06B"/><text x="1544" y="149" text-anchor="end" fill="#4F5D75" font-family="Arial, sans-serif" font-size="16" font-weight="700">CONNECTED</text>
+  <image href="../screenshots/03_instance_control_center.jpg" x="815" y="194" width="770" height="631" preserveAspectRatio="xMidYMid meet" clip-path="url(#screen)"/><rect x="815" y="194" width="770" height="631" fill="none" stroke="#E5E8F1" stroke-width="2"/>
 </svg>
