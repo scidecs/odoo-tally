@@ -14,6 +14,9 @@ All notable public changes to the Scidecs Odoo–TallyPrime integration are docu
 
 ### Documentation
 
+- Rebuilt the store and video hero on a strict editorial grid with the Scidecs brand mark and the
+  official standard Odoo and combined TallyPrime wordmarks; corrected panel padding, alignment,
+  content density and proof-strip spacing while preserving editable SVG source and asset provenance.
 - Added a live-listing benchmark, visual redesign sequence, Odoo-compliant promotion boundary,
   Scidecs domain-authority strategy and phased growth measurement plan.
 - Added the canonical 20-entity feature catalog, screenshot provenance catalog and a secure

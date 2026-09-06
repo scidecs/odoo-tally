@@ -1,32 +1,32 @@
 1
-00:00:00,120 --> 00:00:09,574
+00:00:00,120 --> 00:00:09,532
 Meet Scidecs TallyPrime Integration for Odoo 19: a free, open-source connector designed to remove repeated entry between operations in Odoo and statutory accounting in TallyPrime.
 
 2
-00:00:09,944 --> 00:00:24,184
+00:00:09,902 --> 00:00:24,142
 Create an instance for each company, test the Tally XML gateway, and choose direct or private-LAN agent connectivity. Then set the owner and direction for every enabled entity: Tally to Odoo, Odoo to Tally, or serialized bidirectional synchronization.
 
 3
-00:00:24,554 --> 00:00:39,742
+00:00:24,512 --> 00:00:39,700
 Here is a real live transaction in a disposable test environment. We create a storable product in standard Odoo, set the sale price, cost and SKU, and save it. The module detects the business change automatically; no export file or duplicate typing is needed.
 
 4
-00:00:40,112 --> 00:00:55,957
+00:00:40,070 --> 00:00:55,915
 The Odoo record becomes one durable outbound event with an idempotency key. A worker sends native XML to Tally, records the response, and acknowledges success. On the right, TallyPrime opens its Stock Items list, where the same live demo bearing appears with the synchronized name.
 
 5
-00:00:56,327 --> 00:01:11,398
+00:00:56,285 --> 00:01:11,356
 Opening the new Tally stock item confirms the matching part number, unit and statutory fields. Stable mappings use Tally GUID and Alter ID alongside Odoo identity, preventing fragile name-only matching and stopping synchronized changes from bouncing back as duplicates.
 
 6
-00:01:11,768 --> 00:01:31,305
+00:01:11,726 --> 00:01:31,263
 The same architecture covers customers, vendors, accounts, products, units, categories, godowns, cost centres and taxes; plus invoices, bills, returns, receipts, payments, journals, contra vouchers, inventory adjustments and warehouse transfers. GST ledger structures and inventory allocations remain inspectable on both sides.
 
 7
-00:01:31,675 --> 00:01:48,521
+00:01:31,633 --> 00:01:48,455
 Operators get searchable logs, retry history, payload evidence and clear queue states. Repeatedly malformed inbound records move to quarantine so one poison record cannot stall the watermark. Echo protection, checkpoints, conflict policy and idempotent replay make recovery controlled and auditable.
 
 8
-00:01:48,891 --> 00:02:02,324
+00:01:48,825 --> 00:02:02,258
 The software is free under LGPL version three. Scidecs offers optional discovery, mapping, deployment, UAT and support. Read the full architecture, feature matrix and operating guides in the repository at scidecs dot com.
 
