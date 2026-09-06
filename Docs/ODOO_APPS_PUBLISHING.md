@@ -68,6 +68,8 @@ future refresh; never substitute a mockup for a real Tally screen.
 
 The local MP4 is release evidence, not an Odoo Apps embed. Upload the approved render to the official
 Scidecs video channel, add its SRT, and add only the resulting canonical public URL to the listing.
+The current canonical explainer is `https://www.youtube.com/watch?v=qWfG9NXMgwc`; the Odoo Apps
+description uses its standard YouTube embed URL and retains the canonical watch link as a fallback.
 
 Do not put competitor comparisons in the store page. Keep the dated, source-based comparison in
 `Docs/PRODUCT_AND_MARKETING.md`.
