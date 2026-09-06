@@ -1,32 +1,48 @@
 1
-00:00:00,120 --> 00:00:09,532
-Meet Scidecs TallyPrime Integration for Odoo 19: a free, open-source connector designed to remove repeated entry between operations in Odoo and statutory accounting in TallyPrime.
+00:00:00,120 --> 00:00:09,932
+Meet Scidecs TallyPrime Integration for Odoo 19: a free connector for Odoo operations and TallyPrime accounting, demonstrated here on a real test company.
 
 2
-00:00:09,902 --> 00:00:24,142
-Create an instance for each company, test the Tally XML gateway, and choose direct or private-LAN agent connectivity. Then set the owner and direction for every enabled entity: Tally to Odoo, Odoo to Tally, or serialized bidirectional synchronization.
+00:00:10,302 --> 00:00:21,002
+Each company has an Odoo control centre. Enable the required entities, choose direct or private-LAN connectivity, and set an explicit direction and source of truth.
 
 3
-00:00:24,512 --> 00:00:39,700
-Here is a real live transaction in a disposable test environment. We create a storable product in standard Odoo, set the sale price, cost and SKU, and save it. The module detects the business change automatically; no export file or duplicate typing is needed.
+00:00:21,372 --> 00:00:32,960
+The same Tally company maintains accounts with inventory and GST. Synchronization uses Tally's native XML gateway, with no spreadsheets, scraping or repeated entry.
 
 4
-00:00:40,070 --> 00:00:55,915
-The Odoo record becomes one durable outbound event with an idempotency key. A worker sends native XML to Tally, records the response, and acknowledges success. On the right, TallyPrime opens its Stock Items list, where the same live demo bearing appears with the synchronized name.
+00:00:33,330 --> 00:00:43,742
+A standard Odoo product is saved with its name, price, cost and SKU. The module detects the change and creates one durable outbound event automatically.
 
 5
-00:00:56,285 --> 00:01:11,356
-Opening the new Tally stock item confirms the matching part number, unit and statutory fields. Stable mappings use Tally GUID and Alter ID alongside Odoo identity, preventing fragile name-only matching and stopping synchronized changes from bouncing back as duplicates.
+00:00:44,112 --> 00:00:56,372
+Sync Now processes the event. TallyPrime opens its Stock Items register, where the same demo bearing appears. GUID and Alter ID mappings preserve identity beyond names.
 
 6
-00:01:11,726 --> 00:01:31,263
-The same architecture covers customers, vendors, accounts, products, units, categories, godowns, cost centres and taxes; plus invoices, bills, returns, receipts, payments, journals, contra vouchers, inventory adjustments and warehouse transfers. GST ledger structures and inventory allocations remain inspectable on both sides.
+00:00:56,742 --> 00:01:06,818
+Odoo's outbound queue shows the record, attempt count and acknowledged state. Idempotency makes retries safe and prevents intentional duplicate creation.
 
 7
-00:01:31,633 --> 00:01:48,455
-Operators get searchable logs, retry history, payload evidence and clear queue states. Repeatedly malformed inbound records move to quarantine so one poison record cannot stall the watermark. Echo protection, checkpoints, conflict policy and idempotent replay make recovery controlled and auditable.
+00:01:07,188 --> 00:01:19,760
+Inside Tally, the received item shows the exact name and part number, VID260906-BEARING, plus its statutory and supply details. This is live application evidence.
 
 8
-00:01:48,825 --> 00:02:02,258
-The software is free under LGPL version three. Scidecs offers optional discovery, mapping, deployment, UAT and support. Read the full architecture, feature matrix and operating guides in the repository at scidecs dot com.
+00:01:20,130 --> 00:01:32,702
+This live Tally receipt preserves its account, party, amount and reference. The connector also supports invoices, bills, returns, payments, journals, contra and inventory allocations.
+
+9
+00:01:33,072 --> 00:01:44,780
+Odoo logs current Tally-to-Odoo imports with direction, entity, message and status. Operators can search records, inspect evidence and trace products, ledgers or vouchers.
+
+10
+00:01:45,150 --> 00:01:56,426
+Twenty entity types cover masters, sales, purchases, returns, payments, journals, opening stock, adjustments and warehouse transfers through Tally Stock Journal allocations.
+
+11
+00:01:56,796 --> 00:02:09,416
+Durable queues, stable mappings, watermarks, echo protection and conflict policy support controlled replay. Repeatedly malformed inbound records move to quarantine instead of blocking progress.
+
+12
+00:02:09,786 --> 00:02:21,902
+The LGPL-3 connector is free. Scidecs offers optional mapping, deployment, UAT and support, with complete architecture, operations and FAQ documentation included.
 
