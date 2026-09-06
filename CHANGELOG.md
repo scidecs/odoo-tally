@@ -8,6 +8,9 @@ All notable public changes to the Scidecs Odoo–TallyPrime integration are docu
 
 - Replaced affected punctuation in the Odoo Apps description with safe HTML entities after the live
   page exposed character-encoding corruption.
+- Coalesced unsent stock-item changes by canonical variant. Product creation through both the normal
+  Odoo `product.template` UI and the `product.product` API now produces one current queue row while
+  preserving variant-level SKU and barcode events.
 
 ### Documentation
 
@@ -21,6 +24,8 @@ All notable public changes to the Scidecs Odoo–TallyPrime integration are docu
   sales and purchase, returns, receipts, payments, journal and a five-item Stock Journal transfer.
 - Documented Tally screenshot provenance and privacy exclusions; unfiltered Day Book and connection
   settings were intentionally not published.
+- Added a reproducible two-minute narrated explainer built around a live Odoo product creation and
+  live TallyPrime arrival/detail verification, with editable narration, English subtitles and cover.
 - Extended release checks to reject broken store images, missing alt text, scripts, external image
   assets, private filesystem paths and legacy project references.
 

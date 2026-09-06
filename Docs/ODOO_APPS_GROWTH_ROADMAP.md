@@ -53,7 +53,8 @@ quality scores.
 3. The original listing had no product screenshots; the source now contains 28 sanitized Odoo 19
    interface/result screenshots plus 15 real TallyPrime evidence screens awaiting the next Apps scan.
 4. Architecture and supported-data diagrams remain the largest visual-depth opportunity.
-5. There is no short demonstration video.
+5. A two-minute live product-sync explainer is now complete; public hosting and the canonical listing
+   link remain pending.
 6. There are no genuine ratings, customer quotations or case studies yet.
 7. The page has no visual onboarding journey or "what happens next" section.
 8. Technical differentiation is described but not visualized.
@@ -226,6 +227,7 @@ titles and Scidecs website pages to cover supporting vocabulary.
 - [x] Capture and sanitize 15 real TallyPrime master and voucher screenshots from the disposable
   round-trip company.
 - [ ] Produce architecture and supported-data diagrams.
+- [x] Produce a concise live walkthrough with Odoo creation, split-screen handoff and Tally verification.
 - [x] Rebuild `static/description/index.html` around the recommended narrative and full product tour.
 - [ ] Validate desktop and mobile readability in the live Apps preview.
 - [x] Re-run publication checks and standalone tests after the visual rebuild.
@@ -234,7 +236,8 @@ Exit criterion: the page explains value, scope, operation and proof visually bef
 
 ### Phase 2 - demonstration and trust
 
-- [ ] Record a 3-5 minute installation/round-trip overview.
+- [x] Record a two-minute live synchronization overview with narration and captions.
+- [ ] Record a 3-5 minute installation and configuration deep dive.
 - [ ] Record a deeper technical walkthrough.
 - [ ] Add one canonical YouTube link to the Apps page.
 - [ ] Publish the Scidecs product hub and first four technical articles.

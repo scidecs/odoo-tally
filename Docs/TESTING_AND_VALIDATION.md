@@ -52,7 +52,8 @@ Current regression coverage includes:
 - Workflow echo events do not return to Tally.
 - Odoo/Tally source policy is respected.
 - Stable mappings and outbound GUID identity.
-- Product create enqueues exactly once.
+- Product create enqueues exactly once through both the standard `product.template` UI path and the
+  direct `product.product` API path.
 - Product stock group/category retention.
 - Zero closing stock remains zero.
 - Repeated total stock pulls preserve secondary-location quantity and total idempotency.

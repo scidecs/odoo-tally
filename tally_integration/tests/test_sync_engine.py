@@ -337,16 +337,28 @@ class TestTallySyncEngine(TransactionCase):
 
     def test_product_create_enqueues_exactly_once(self):
         self._config("stock_item", direction="both", source="odoo")
-        product = self.env["product.product"].create({
-            "name": "Single Product Queue Event", "is_storable": True,
+        template = self.env["product.template"].create({
+            "name": "Template UI Queue Event", "is_storable": True,
             "standard_price": 10.0, "list_price": 15.0,
             "company_id": self.env.company.id,
         })
-        queue = self.env["tally.sync.queue"].search([
+        template_queue = self.env["tally.sync.queue"].search([
+            ("instance_id", "=", self.instance.id), ("entity", "=", "stock_item"),
+            ("odoo_model_name", "=", template.product_variant_id._name),
+            ("odoo_res_id", "=", template.product_variant_id.id),
+        ])
+        self.assertEqual(len(template_queue), 1)
+
+        product = self.env["product.product"].create({
+            "name": "Variant API Queue Event", "is_storable": True,
+            "standard_price": 20.0, "list_price": 30.0,
+            "company_id": self.env.company.id,
+        })
+        product_queue = self.env["tally.sync.queue"].search([
             ("instance_id", "=", self.instance.id), ("entity", "=", "stock_item"),
             ("odoo_model_name", "=", product._name), ("odoo_res_id", "=", product.id),
         ])
-        self.assertEqual(len(queue), 1)
+        self.assertEqual(len(product_queue), 1)
 
     def test_stock_item_standard_rates_include_required_effective_date(self):
         from ..services.tally_xml_builder import build_stock_item_xml

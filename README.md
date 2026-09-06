@@ -158,6 +158,8 @@ The release was validated using:
 - A real TallyPrime round trip covering 15 products, purchases, sales, both returns, CGST/SGST,
   receipts, payments, a journal, and an internal Stock Journal transfer.
 - Fresh-database recovery, repeated-pull idempotency, and price edits in both directions.
+- A privacy-reviewed 1080p live walkthrough showing an Odoo product creation, split-screen handoff,
+  TallyPrime stock-item arrival, and matching part-number verification.
 
 Read [Testing and Validation](Docs/TESTING_AND_VALIDATION.md) and the
 [release evidence summary](tally_integration/FINAL_VALIDATION_REPORT.md).
@@ -196,6 +198,7 @@ different hidden edition of the connector. See [Support and Consulting](Docs/SUP
 | [Complete Feature Catalog](Docs/FEATURE_CATALOG.md) | Buyers, implementers, support, developers | Canonical 20-entity, UI, operations, reliability and security inventory |
 | [Screenshot Catalog](Docs/SCREENSHOT_CATALOG.md) | Release, sales, support | Provenance and purpose of every published product image |
 | [Tally Screenshot Capture Guide](Docs/TALLY_SCREENSHOT_CAPTURE_GUIDE.md) | QA, release manager | Sanitized TallyPrime desktop evidence checklist |
+| [Live Explainer Video](Docs/video/README.md) | Buyers, sales, implementers | Two-minute live Odoo-to-Tally demonstration, narration and reproducible source |
 | [Architecture](Docs/ARCHITECTURE.md) | Architects, technical leads | End-to-end components, flows and failure design |
 | [Technical Reference](Docs/TECHNICAL_REFERENCE.md) | Developers, reviewers | Models, APIs, entities, XML, hooks and extension rules |
 | [Installation and Operations](Docs/INSTALLATION_AND_OPERATIONS.md) | Implementers, administrators | Installation, configuration, runbooks and recovery |

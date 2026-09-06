@@ -56,6 +56,8 @@ The repository currently passes:
    receipt, payment, journal and internal transfer.
 6. Fresh-database recovery, repeat-pull idempotency, and verified/restored price edits in both
    directions.
+7. A 1080p live demonstration that creates a synthetic product in Odoo, shows the split-screen
+   handoff, and verifies its exact name and SKU/part number in TallyPrime.
 
 A customer deployment is complete only after UAT against that customer's TallyPrime release,
 voucher configurations, GST ledgers, security proxy, fiscal periods, and representative data.

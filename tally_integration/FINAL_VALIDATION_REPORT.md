@@ -95,7 +95,8 @@ Final clean Odoo 19 install on database `odootally_test_final`:
 - 20 post-install test methods / 22 Odoo framework test counts: **0 failed, 0 errors**.
 
 The regression suite covers failed-watermark safety, three-attempt quarantine, surgical retry,
-echo acknowledgement resolution, product single-enqueue behavior, workflow echo suppression,
+echo acknowledgement resolution, product single-enqueue behavior through both the normal template UI
+and direct variant API, workflow echo suppression,
 stable identity, ownership policy, invoice amount balancing, dated standard prices, opening
 balance integrity, stock-group retention, zero closing stock, repeated stock idempotency, and
 internal transfer creation.
@@ -106,6 +107,11 @@ are the exercised failure path, not test failures.
 ## 4. Live Tally round-trip evidence
 
 Live endpoint: private LAN test endpoint (redacted from the public report)<br>
+
+A post-fix live capture created synthetic SKU `VID260906-BEARING` through the standard Odoo product
+form. The database contained one acknowledged stock-item queue row, and TallyPrime displayed the
+matching `VID260906 Live Demo Bearing` master and part number. The two-minute video and reproducible
+source are documented in `Docs/video/README.md`.
 Tally company: `Scidecs Demo Pvt Ltd`<br>
 Scenario namespace: `RT260904F`
 

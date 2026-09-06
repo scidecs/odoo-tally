@@ -90,7 +90,7 @@ class ProductTemplate(models.Model):
             if not should_enqueue:
                 return
 
-            self.env["tally.sync.queue"].create({
+            queue_values = {
                 "instance_id": instance.id,
                 "entity": "stock_item",
                 "odoo_model_name": identity._name,
@@ -99,7 +99,25 @@ class ProductTemplate(models.Model):
                     identity.id, self.write_date and self.write_date.strftime("%Y%m%d%H%M%S") or ""),
                 "payload": envelope_xml,
                 "state": "pending",
-            })
+            }
+            # Product creation touches product.template and its automatically
+            # generated product.product variant in the same transaction. Keep
+            # only the newest unsent payload for that canonical variant rather
+            # than producing two deliveries for one business event.
+            pending = self.env["tally.sync.queue"].search([
+                ("instance_id", "=", instance.id),
+                ("entity", "=", "stock_item"),
+                ("odoo_model_name", "=", identity._name),
+                ("odoo_res_id", "=", identity.id),
+                ("state", "=", "pending"),
+            ], order="id desc", limit=1)
+            if pending:
+                pending.write({
+                    "idempotency_key": queue_values["idempotency_key"],
+                    "payload": envelope_xml,
+                })
+            else:
+                self.env["tally.sync.queue"].create(queue_values)
         except Exception as e:
             _logger.warning("Tally product enqueue skipped for product %s: %s", self.id, e)
 

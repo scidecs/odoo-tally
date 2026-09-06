@@ -132,7 +132,7 @@ configurable on the instance.
 |---|---|
 | `res.partner` | Customer/vendor ledger create/write |
 | `account.account` | General ledger create/write |
-| `product.template` / `product.product` | Stock item create/write with canonical variant identity |
+| `product.template` / `product.product` | Stock item create/write with canonical variant identity; unsent template/variant events coalesce into one current queue row |
 | `uom.uom` | Unit create/write |
 | `product.category` | Stock group create/write |
 | `stock.location` | Internal godown create/write |

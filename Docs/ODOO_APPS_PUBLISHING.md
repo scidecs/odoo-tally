@@ -57,12 +57,17 @@ mix code for another Odoo major version into `19.0`.
 - [x] Added 28 sanitized Odoo 19 UI screenshots covering every connector view and key synchronized results.
 - [x] Added 15 real, sanitized TallyPrime screens covering masters, GST vouchers, returns, payments,
   journal and warehouse transfer.
+- [x] Added a 1080p two-minute live Odoo-to-Tally walkthrough, standalone/embedded English captions,
+  cover image, editable narration and reproducible source clips.
 - [ ] Render and inspect the page in the Apps preview.
 - [x] Confirmed all 44 local image references exist and every image has descriptive alt text.
 
 TallyPrime desktop evidence was captured from the disposable company through a user-authorized
 remote session. Follow `Docs/TALLY_SCREENSHOT_CAPTURE_GUIDE.md` for provenance, exclusions and any
 future refresh; never substitute a mockup for a real Tally screen.
+
+The local MP4 is release evidence, not an Odoo Apps embed. Upload the approved render to the official
+Scidecs video channel, add its SRT, and add only the resulting canonical public URL to the listing.
 
 Do not put competitor comparisons in the store page. Keep the dated, source-based comparison in
 `Docs/PRODUCT_AND_MARKETING.md`.
