@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 {
-    "name": "Tally Prime Integration",
-    "summary": "Free, configurable two-way TallyPrime sync for Odoo 19",
+    "name": "Odoo Tally Connector",
+    "summary": "Free two-way Odoo TallyPrime integration for GST, invoices, inventory and payments",
     "description": """
-Tally Prime ⇄ Odoo 19 Integration
-=================================
-A single native module for near-real-time, two-way synchronization between TallyPrime
-and Odoo 19 (Odoo.sh / On-Premise). Tally is the default source of truth, configurable per entity.
+Odoo Tally Connector | TallyPrime Integration for Odoo 19
+==========================================================
+A native Odoo Tally connector for near-real-time, two-way synchronization between TallyPrime
+and Odoo 19 Community or Enterprise on Odoo.sh and on-premise. Configure Tally-first, Odoo-first,
+one-way or serialized bidirectional synchronization independently for every supported entity.
 
 * Supported master data: groups, general accounts, parties, units of measure, stock groups,
   stock items, godowns/locations, cost centres, taxes, and currencies.
@@ -24,7 +25,7 @@ and Odoo 19 (Odoo.sh / On-Premise). Tally is the default source of truth, config
     "website": "https://www.scidecs.com",
     "support": "hello@scidecs.com",
     "license": "LGPL-3",
-    "images": ["static/description/raw_banner.png"],
+    "images": ["static/description/assets/store_hero_v3.png"],
     "depends": ["base", "mail", "account", "uom", "product", "stock", "analytic"],
     "data": [
         "security/tally_security.xml",

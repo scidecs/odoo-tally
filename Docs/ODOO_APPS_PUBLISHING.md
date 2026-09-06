@@ -33,7 +33,7 @@ mix code for another Odoo major version into `19.0`.
 
 ## 4. Manifest checklist
 
-- [x] Explicit name no longer than 25 characters: `Tally Prime Integration`.
+- [x] Explicit name no longer than 25 characters: `Odoo Tally Connector`.
 - [x] Version: Odoo-major plus semantic module version.
 - [x] License: `LGPL-3`.
 - [x] Complete dependency list.
@@ -59,8 +59,9 @@ mix code for another Odoo major version into `19.0`.
   journal and warehouse transfer.
 - [x] Added a 1080p two-minute live Odoo-to-Tally walkthrough, standalone/embedded English captions,
   cover image, editable narration and reproducible source clips.
-- [ ] Render and inspect the page in the Apps preview.
-- [x] Confirmed all 44 local image references exist and every image has descriptive alt text.
+- [x] Render and inspect the page locally at desktop and mobile widths.
+- [ ] Inspect the rescanned page in the Odoo Apps preview.
+- [x] Confirmed all 47 local image references exist and every image has descriptive alt text.
 
 TallyPrime desktop evidence was captured from the disposable company through a user-authorized
 remote session. Follow `Docs/TALLY_SCREENSHOT_CAPTURE_GUIDE.md` for provenance, exclusions and any
@@ -68,8 +69,12 @@ future refresh; never substitute a mockup for a real Tally screen.
 
 The local MP4 is release evidence, not an Odoo Apps embed. Upload the approved render to the official
 Scidecs video channel, add its SRT, and add only the resulting canonical public URL to the listing.
-The current canonical explainer is `https://www.youtube.com/watch?v=qWfG9NXMgwc`; the Odoo Apps
-description uses its standard YouTube embed URL and retains the canonical watch link as a fallback.
+The current canonical explainer is `https://www.youtube.com/watch?v=qWfG9NXMgwc`. Odoo Apps removes
+raw iframe markup from uploaded descriptions, so the listing uses a designed local preview image
+wrapped in the canonical YouTube link. This is the same scanner-safe pattern used by established
+publishers: the preview remains visible and the video opens on YouTube in a new tab. The walkthrough
+is intentionally near the bottom after product proof and FAQ, immediately before the final support
+CTA.
 
 Do not put competitor comparisons in the store page. Keep the dated, source-based comparison in
 `Docs/PRODUCT_AND_MARKETING.md`.
