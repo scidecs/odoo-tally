@@ -51,8 +51,8 @@ quality scores.
    been replaced by a 1600 x 800 landscape integration cover.
 2. The description previously opened with logo artwork; it now opens with an outcome-led hero.
 3. The original listing had no product screenshots; the source now contains 28 sanitized Odoo 19
-   interface and synchronized-result screenshots awaiting the next Apps scan.
-4. The page is mostly text and Bootstrap cards; visual rhythm and evidence density are low.
+   interface/result screenshots plus 15 real TallyPrime evidence screens awaiting the next Apps scan.
+4. Architecture and supported-data diagrams remain the largest visual-depth opportunity.
 5. There is no short demonstration video.
 6. There are no genuine ratings, customer quotations or case studies yet.
 7. The page has no visual onboarding journey or "what happens next" section.
@@ -223,6 +223,8 @@ titles and Scidecs website pages to cover supporting vocabulary.
 
 - [x] Design the landscape store cover and description hero.
 - [x] Capture and sanitize 28 Odoo interface and business-result screenshots, exceeding the five P0 views.
+- [x] Capture and sanitize 15 real TallyPrime master and voucher screenshots from the disposable
+  round-trip company.
 - [ ] Produce architecture and supported-data diagrams.
 - [x] Rebuild `static/description/index.html` around the recommended narrative and full product tour.
 - [ ] Validate desktop and mobile readability in the live Apps preview.

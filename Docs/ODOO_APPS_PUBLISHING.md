@@ -1,6 +1,6 @@
 # Odoo Apps Publishing Guide
 
-Last reviewed: 2026-09-05
+Last reviewed: 2026-09-06
 
 ## 1. Release objective
 
@@ -55,12 +55,14 @@ mix code for another Odoo major version into `19.0`.
 - [x] Free-license and optional-support model stated factually.
 - [x] Local icon and banner.
 - [x] Added 28 sanitized Odoo 19 UI screenshots covering every connector view and key synchronized results.
+- [x] Added 15 real, sanitized TallyPrime screens covering masters, GST vouchers, returns, payments,
+  journal and warehouse transfer.
 - [ ] Render and inspect the page in the Apps preview.
-- [x] Confirmed all 29 local image references exist and every image has descriptive alt text.
+- [x] Confirmed all 44 local image references exist and every image has descriptive alt text.
 
-TallyPrime desktop screenshots remain a separate evidence task because they require authorized
-access to the Windows host. Follow `Docs/TALLY_SCREENSHOT_CAPTURE_GUIDE.md`; never substitute a
-mockup for a real Tally screen.
+TallyPrime desktop evidence was captured from the disposable company through a user-authorized
+remote session. Follow `Docs/TALLY_SCREENSHOT_CAPTURE_GUIDE.md` for provenance, exclusions and any
+future refresh; never substitute a mockup for a real Tally screen.
 
 Do not put competitor comparisons in the store page. Keep the dated, source-based comparison in
 `Docs/PRODUCT_AND_MARKETING.md`.

@@ -1,10 +1,11 @@
 # Screenshot and Visual Evidence Catalog
 
 The Odoo Apps product tour uses screenshots captured from a running Odoo 19 installation on
-2026-09-05. Interface images use synthetic Scidecs demo labels or the disposable live-round-trip
-test scenario; private infrastructure values and credentials are excluded. Empty monitoring views
-were temporarily populated with clearly marked synthetic `[Store Demo]` records, then the records
-were removed from the test database after capture.
+2026-09-05 and a real TallyPrime EDU session on 2026-09-06. Interface images use synthetic Scidecs
+demo labels or the disposable live-round-trip test scenario; private infrastructure values and
+credentials are excluded. Empty Odoo monitoring views were temporarily populated with clearly
+marked synthetic `[Store Demo]` records, then the records were removed from the test database after
+capture.
 
 ## Module control centre
 
@@ -59,8 +60,31 @@ the distributable module so the Odoo Apps renderer uses only local assets.
 
 ## TallyPrime desktop evidence
 
-TallyPrime runs on the separate Windows test host. Its XML gateway and remote-desktop ports were not
-reachable from the publishing workstation at the time of this capture. No Tally UI screenshot is
-fabricated or inferred from XML. Follow [Tally Screenshot Capture Guide](TALLY_SCREENSHOT_CAPTURE_GUIDE.md)
-once a user-authorized browser remote session is available; then place the sanitized files in
-`tally_integration/static/description/screenshots/tally/` and add them to the product tour.
+The following real TallyPrime screens were captured through a user-authorized temporary remote
+session against the disposable `Scidecs Demo Pvt Ltd` company. Each published voucher was opened
+individually so its lines, ledgers, quantities, taxes or transfer locations are visible. The
+unfiltered Day Book was intentionally excluded because unrelated test-company names were present.
+The Tally connectivity-settings screen was also excluded because it is unnecessary for product
+proof and could reveal infrastructure details.
+
+| Asset | What it proves |
+|---|---|
+| `tally/tally_01_gateway_company.jpg` | TallyPrime and the isolated disposable company |
+| `tally/tally_03_account_groups.jpg` | Native account-group hierarchy |
+| `tally/tally_04_ledgers.jpg` | Synthetic customer party ledger detail |
+| `tally/tally_05_stock_groups.jpg` | RT260904 stock-group/category results |
+| `tally/tally_06_stock_items.jpg` | Numbered round-trip product catalog in Tally |
+| `tally/tally_07_stock_item_detail.jpg` | Item group, unit and GST applicability |
+| `tally/tally_08_godown_summary.jpg` | Source and destination godown masters |
+| `tally/tally_09_sales_gst_voucher.jpg` | Multi-item sales with output CGST/SGST |
+| `tally/tally_10_purchase_gst_voucher.jpg` | Multi-item purchase with input CGST/SGST |
+| `tally/tally_11_credit_note.jpg` | Customer inventory return and tax reversal |
+| `tally/tally_12_debit_note.jpg` | Vendor inventory return and tax reversal |
+| `tally/tally_13_receipt.jpg` | Bank receipt against the synthetic customer |
+| `tally/tally_14_payment.jpg` | Bank payment against the synthetic vendor |
+| `tally/tally_15_journal.jpg` | Balanced general journal voucher |
+| `tally/tally_17_stock_journal.jpg` | Five-item source-to-destination godown transfer |
+
+All Tally files are under `tally_integration/static/description/screenshots/tally/`. They are
+unaltered interface captures apart from a consistent crop that removes browser chrome, remote-
+desktop margins and the Windows taskbar. No Tally screen is fabricated or inferred from XML.

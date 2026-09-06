@@ -17,6 +17,10 @@ All notable public changes to the Scidecs Odoo–TallyPrime integration are docu
   TallyPrime desktop capture checklist.
 - Rebuilt the Odoo Apps description as a complete visual product tour using 28 sanitized Odoo 19
   screenshots, a landscape cover, exhaustive capability matrix and honest product boundary.
+- Added 15 real, sanitized TallyPrime screenshots covering the disposable company, master data, GST
+  sales and purchase, returns, receipts, payments, journal and a five-item Stock Journal transfer.
+- Documented Tally screenshot provenance and privacy exclusions; unfiltered Day Book and connection
+  settings were intentionally not published.
 - Extended release checks to reject broken store images, missing alt text, scripts, external image
   assets, private filesystem paths and legacy project references.
 
