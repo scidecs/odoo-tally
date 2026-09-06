@@ -44,6 +44,14 @@ frames; small radii are used inside those shells. The listing uses Bootstrap 4 g
 typography, card, badge, table and button utilities, supplemented only by restrained inline visual
 tokens. No external CSS or JS is required.
 
+### Marketplace sanitizer rule
+
+Use the explicit CSS property `background-color`, never the `background` shorthand. The Odoo Apps
+sanitizer removes the shorthand and box shadows while preserving approved color, spacing and radius
+declarations. If a dark section is used, add `text-white` directly to its headings because the
+marketplace heading rule can override color inherited from a parent. Always inspect the rescanned
+listing; a raw local file is not evidence of the sanitized result.
+
 ## Page architecture
 
 1. Product-led visual hero using the real Odoo control centre and correct platform marks.
