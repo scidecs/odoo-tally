@@ -1506,18 +1506,19 @@ class SyncEngine:
                 (e for e in incoming if e.get("item") == source_line.get("item")), incoming[0])
             source = self._upsert_godown({"name": source_line.get("godown") or "Main Location"})
             destination = self._upsert_godown({"name": destination_line.get("godown") or "Main Location"})
-            move_commands.append((0, 0, {
-                # Odoo 18 requires ``stock.move.name``. Keep
-                # ``description_picking`` too so the description shown on the
-                # transfer matches the Tally stock item.
-                "name": source_line.get("item") or ref,
+            move_vals = {
                 "description_picking": source_line.get("item") or ref,
                 "product_id": product.id,
                 "product_uom_qty": abs(float(source_line.get("qty") or 0.0)),
                 "product_uom": product.uom_id.id,
                 "location_id": source.id,
                 "location_dest_id": destination.id,
-            }))
+            }
+            # Odoo 18 requires ``stock.move.name``; Odoo 19 removed it in favor
+            # of ``description_picking``.
+            if "name" in self.env["stock.move"]._fields:
+                move_vals["name"] = source_line.get("item") or ref
+            move_commands.append((0, 0, move_vals))
         vals = {
             "picking_type_id": picking_type.id,
             "location_id": move_commands[0][2]["location_id"],

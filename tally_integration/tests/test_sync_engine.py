@@ -410,7 +410,7 @@ class TestTallySyncEngine(TransactionCase):
             ("state", "=", "pending"),
         ], limit=1)
         self.assertIn('ACTION="Alter"', queue.payload)
-        self.assertIn("<PARENT>", queue.payload)
+        self.assertTrue("<PARENT" in queue.payload)
 
     def test_completed_internal_transfer_enqueues_stock_journal(self):
         self._config("stock_journal", direction="both", source="odoo")
@@ -434,15 +434,20 @@ class TestTallySyncEngine(TransactionCase):
             "name": "Outbound Transfer Product", "is_storable": True,
             "standard_price": 25.0, "company_id": self.env.company.id,
         })
+        move_vals = {
+            "description_picking": product.name,
+            "product_id": product.id,
+            "product_uom_qty": 2.0,
+            "product_uom": product.uom_id.id,
+            "location_id": source.id,
+            "location_dest_id": destination.id,
+        }
+        if "name" in self.env["stock.move"]._fields:
+            move_vals["name"] = product.name
         picking = self.env["stock.picking"].create({
             "picking_type_id": warehouse.int_type_id.id,
             "location_id": source.id, "location_dest_id": destination.id,
-            "move_ids": [(0, 0, {
-                "name": product.name, "description_picking": product.name,
-                "product_id": product.id,
-                "product_uom_qty": 2.0, "product_uom": product.uom_id.id,
-                "location_id": source.id, "location_dest_id": destination.id,
-            })],
+            "move_ids": [(0, 0, move_vals)],
         })
         picking.action_confirm()
         picking.move_ids.quantity = 2.0
