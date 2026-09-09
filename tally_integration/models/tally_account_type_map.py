@@ -22,10 +22,10 @@ class TallyAccountTypeMap(models.Model):
         ACCOUNT_TYPE_SELECTION, string="Odoo Account Type", required=True)
     note = fields.Char()
 
-    _tally_group_uniq = models.Constraint(
-        "UNIQUE(tally_group)",
-        "A mapping for this Tally group already exists.",
-    )
+    _sql_constraints = [
+        ("tally_group_uniq", "UNIQUE(tally_group)",
+         "A mapping for this Tally group already exists."),
+    ]
 
     @api.model
     def resolve(self, tally_group):

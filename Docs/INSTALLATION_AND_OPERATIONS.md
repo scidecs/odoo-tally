@@ -9,7 +9,7 @@ support team responsible for deployment and daily operation.
 
 ### Odoo
 
-- Odoo 19 Community or Enterprise on Odoo.sh or on-premise.
+- Odoo 18 Community or Enterprise on Odoo.sh or on-premise.
 - Administrative access to install a custom addon.
 - PostgreSQL/database backup capability.
 - Installed dependencies: Accounting/Invoicing, Discuss, Product, UoM, Inventory and Analytic.
@@ -64,7 +64,7 @@ For command-line installation:
 odoo-bin -d TARGET_DATABASE -i tally_integration --stop-after-init
 ```
 
-Always use the target Odoo 19 executable/configuration and back up before an upgrade:
+Always use the target Odoo 18 executable/configuration and back up before an upgrade:
 
 ```bash
 odoo-bin -d TARGET_DATABASE -u tally_integration --stop-after-init

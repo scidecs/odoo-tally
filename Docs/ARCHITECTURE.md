@@ -30,7 +30,7 @@ Design principles:
 ```mermaid
 flowchart LR
     Users[Sales, inventory and finance users]
-    Odoo[Odoo 19]
+    Odoo[Odoo 18]
     Queue[(Outbound queue)]
     Map[(Identity map)]
     Log[(Sync log)]

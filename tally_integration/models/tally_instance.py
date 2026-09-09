@@ -175,14 +175,13 @@ class TallyInstance(models.Model):
     quarantine_count = fields.Integer(compute="_compute_counts")
     synced_today = fields.Integer(string="Synced Today", compute="_compute_counts")
 
-    _name_company_uniq = models.Constraint(
-        "UNIQUE(name, company_id)",
-        "Instance name must be unique per company.",
-    )
-    _positive_quarantine_threshold = models.Constraint(
-        "CHECK(inbound_quarantine_threshold >= 1)",
-        "Inbound quarantine attempts must be at least 1.",
-    )
+    _sql_constraints = [
+        ("name_company_uniq", "UNIQUE(name, company_id)",
+         "Instance name must be unique per company."),
+        ("positive_quarantine_threshold",
+         "CHECK(inbound_quarantine_threshold >= 1)",
+         "Inbound quarantine attempts must be at least 1."),
+    ]
 
     @api.constrains("active", "company_id")
     def _check_single_active_instance_per_company(self):

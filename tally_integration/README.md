@@ -1,10 +1,10 @@
-# Tally Prime Integration for Odoo 19
+# Tally Prime Integration for Odoo 18
 
 This is the installable Odoo addon from the
 [Scidecs Odoo–TallyPrime Integration](https://github.com/scidecs/odoo-tally) repository.
 
 It provides configurable synchronization of supported accounting and inventory masters and
-vouchers between Odoo 19 and TallyPrime through the native XML gateway. Direct and outbound-only
+vouchers between Odoo 18 and TallyPrime through the native XML gateway. Direct and outbound-only
 agent deployments are supported. The addon includes durable outbound work, stable mappings,
 source-of-truth policy, echo suppression, audit logs, and inbound poison-record quarantine.
 
@@ -20,11 +20,12 @@ customization services are available from Scidecs; no paid activation is require
 - [Technical reference](../Docs/TECHNICAL_REFERENCE.md)
 - [Installation and operations](../Docs/INSTALLATION_AND_OPERATIONS.md)
 - [Testing and validation](../Docs/TESTING_AND_VALIDATION.md)
+- [Odoo 18 Enterprise validation report](../Docs/ODOO18_VALIDATION_REPORT.md)
 - [FAQ](../Docs/FAQ.md)
 - [Support model](../Docs/SUPPORT_AND_CONSULTING.md)
 - [Odoo Apps publishing checklist](../Docs/ODOO_APPS_PUBLISHING.md)
 - [TallyPrime screenshot capture guide](../Docs/TALLY_SCREENSHOT_CAPTURE_GUIDE.md)
-- [Final validation report](FINAL_VALIDATION_REPORT.md)
+- [Earlier Odoo 19 validation report](FINAL_VALIDATION_REPORT.md)
 
 ## Supported entities
 
@@ -43,7 +44,7 @@ part of this release.
 
 ## Minimal installation
 
-1. Add `tally_integration` to an Odoo 19 addons path.
+1. Add `tally_integration` to an Odoo 18 addons path.
 2. Update Apps and install **Tally Prime Integration**.
 3. Create a Tally instance, load default entities, and explicitly review direction/source policy.
 4. Use a backed-up test company for connection testing and UAT.

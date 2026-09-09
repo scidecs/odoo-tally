@@ -56,6 +56,20 @@ class ProductTemplate(models.Model):
                 legacy_mapping.write({
                     "odoo_model_name": identity._name, "odoo_res_id": identity.id,
                 })
+            mapping = self.env["tally.mapping"].search([
+                ("instance_id", "=", instance.id), ("entity", "=", "stock_item"),
+                ("odoo_model_name", "=", identity._name), ("odoo_res_id", "=", identity.id),
+            ], limit=1)
+            # Tally may reset structural fields (notably PARENT) when an
+            # existing GUID is resent with ACTION="Create". Keep Create while
+            # the first unsent payload is being coalesced, then use Alter for
+            # records already known to either side.
+            pending_create = self.env["tally.sync.queue"].search_count([
+                ("instance_id", "=", instance.id), ("entity", "=", "stock_item"),
+                ("odoo_model_name", "=", identity._name), ("odoo_res_id", "=", identity.id),
+                ("state", "=", "pending"), ("payload", "ilike", 'ACTION="Create"'),
+            ])
+            action = "Create" if not mapping or pending_create else "Alter"
             guid = self.env["tally.mapping"].outbound_guid(
                 instance, "stock_item", identity._name, identity.id)
             base_uom = tally_xml_builder.normalize_tally_uom(
@@ -74,6 +88,7 @@ class ProductTemplate(models.Model):
                 part_no=identity.default_code,
                 barcode=identity.barcode,
                 effective_date=rate_date,
+                action=action,
             )
             envelope_xml = tally_xml_builder.wrap_import_envelope(
                 [msg_xml], company_name=instance.tally_company)

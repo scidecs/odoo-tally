@@ -18,7 +18,7 @@ import odoo
 from odoo import api, SUPERUSER_ID
 from odoo.modules.registry import Registry
 
-PREFIX = "RT260904F"
+PREFIX = os.environ.get("ROUNDTRIP_PREFIX", "RT260904F")
 PRODUCTS = [
     ("Hydraulic Pump 5HP", "84136090", 7200.0, 9500.0),
     ("Industrial Valve 50mm", "84818030", 1200.0, 1750.0),
@@ -235,7 +235,7 @@ def seed(env, instance):
             "location_id": warehouse.lot_stock_id.id, "location_dest_id": secondary.id,
             "origin": transfer_origin,
             "move_ids": [(0, 0, {
-                "description_picking": p.name, "product_id": p.id,
+                "name": p.name, "description_picking": p.name, "product_id": p.id,
                 "product_uom_qty": 1.0, "product_uom": p.uom_id.id,
                 "location_id": warehouse.lot_stock_id.id, "location_dest_id": secondary.id,
             }) for p in products[:5]],

@@ -5,7 +5,7 @@
 | Item | Value |
 |---|---|
 | Technical name | `tally_integration` |
-| Odoo version | 19.0 |
+| Odoo version | 18.0 |
 | License | LGPL-3 |
 | Maintainer | Scidecs |
 | Python dependencies | Odoo and Python standard library only |
@@ -249,7 +249,7 @@ python3 scripts/run_stage_checks.sh
 python3 -m pytest -q tests
 ```
 
-For Odoo transactional tests, use a disposable database and the target Odoo 19 runtime. The exact
+For Odoo transactional tests, use a disposable database and the target Odoo 18 runtime. The exact
 reference command and live-test safety rules are in [Testing and Validation](TESTING_AND_VALIDATION.md).
 
 ## 12. Adding an entity

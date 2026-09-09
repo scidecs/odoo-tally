@@ -8,7 +8,7 @@
 
   <rect x="108" y="196" width="130" height="42" rx="21" fill="#EEEAFE"/><text x="173" y="224" text-anchor="middle" fill="#5146E5" font-family="Arial, sans-serif" font-size="16" font-weight="700">OPERATIONS</text>
   <image href="odoo_logo.png" x="150" y="264" width="274" height="90" preserveAspectRatio="xMidYMid meet"/>
-  <text x="287" y="408" text-anchor="middle" fill="#101B44" font-family="Arial, sans-serif" font-size="25" font-weight="700">Odoo 19</text>
+  <text x="287" y="408" text-anchor="middle" fill="#101B44" font-family="Arial, sans-serif" font-size="25" font-weight="700">Odoo 18</text>
   <text x="287" y="448" text-anchor="middle" fill="#4F5D75" font-family="Arial, sans-serif" font-size="19">Sales • purchase • inventory</text><text x="287" y="480" text-anchor="middle" fill="#4F5D75" font-family="Arial, sans-serif" font-size="19">warehouses • GST • journals</text>
 
   <circle cx="840" cy="226" r="55" fill="#62D8CD"/><path d="M810 226h60M850 206l20 20-20 20M830 266l-20-20 20-20" fill="none" stroke="#101B44" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>

@@ -4,7 +4,7 @@
 
 ### What is this module?
 
-It is a free Odoo 19 addon that synchronizes a documented set of accounting and inventory masters
+It is a free Odoo 18 addon that synchronizes a documented set of accounting and inventory masters
 and vouchers with TallyPrime through the native XML gateway.
 
 ### Is the module really free?
@@ -33,7 +33,7 @@ current verified partnership. Tally/TallyPrime and Odoo trademarks belong to the
 
 ### Which Odoo version is supported?
 
-This release targets Odoo 19. Community and Enterprise code paths are supported. Always run a clean
+This release targets Odoo 18. Community and Enterprise code paths are supported. Always run a clean
 install and customer regression against the exact Odoo build and other custom modules.
 
 ### Does it work on Odoo.sh and on-premise?
@@ -51,7 +51,7 @@ predictable custom-addon and connectivity control.
 
 The implementation targets the native TallyPrime XML gateway. Tally configurations vary; validate
 the customer's exact release, enabled features and custom TDL during UAT. Tally ERP 9 is not claimed
-as a tested release by this Odoo 19 package.
+as a tested release by this Odoo 18 package.
 
 ### What master data is supported?
 
@@ -242,6 +242,8 @@ unexpected absence of successful movements.
 
 Yes. The documented reference scenario covered 15 products, purchases, sales, returns, CGST/SGST,
 payments, a journal, internal transfer, clean recovery, repeated pull and edits in both directions.
+The Odoo 18 Enterprise execution is recorded in
+[Odoo 18 Validation Report](ODOO18_VALIDATION_REPORT.md).
 
 ### Is it production ready?
 

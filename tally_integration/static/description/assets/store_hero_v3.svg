@@ -7,7 +7,7 @@
   <circle cx="1572" cy="86" r="176" fill="#E5E2FF"/><circle cx="72" cy="850" r="188" fill="#DDF5F1"/>
   <image href="scidecs_mark.png" x="62" y="52" width="46" height="46" preserveAspectRatio="xMidYMid meet"/>
   <text x="124" y="83" fill="#101B44" font-family="Arial, sans-serif" font-size="23" font-weight="700" letter-spacing="2.5">SCIDECS CONNECT</text>
-  <rect x="62" y="145" width="246" height="42" rx="21" fill="#E5E2FF"/><text x="88" y="173" fill="#5146E5" font-family="Arial, sans-serif" font-size="17" font-weight="700" letter-spacing="1.2">ODOO 19  •  TALLYPRIME</text>
+  <rect x="62" y="145" width="246" height="42" rx="21" fill="#E5E2FF"/><text x="88" y="173" fill="#5146E5" font-family="Arial, sans-serif" font-size="17" font-weight="700" letter-spacing="1.2">ODOO 18  •  TALLYPRIME</text>
   <text x="62" y="278" fill="#101B44" font-family="Arial, sans-serif" font-size="60" font-weight="800">Enter it once.</text>
   <text x="62" y="347" fill="#5146E5" font-family="Arial, sans-serif" font-size="56" font-weight="800">Keep both books aligned.</text>
   <text x="62" y="411" fill="#4F5D75" font-family="Arial, sans-serif" font-size="23">Free two-way synchronization for accounting, GST,</text><text x="62" y="446" fill="#4F5D75" font-family="Arial, sans-serif" font-size="23">inventory and payments.</text>

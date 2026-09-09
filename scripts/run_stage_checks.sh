@@ -28,6 +28,7 @@ d = ast.literal_eval(src[src.index("{"):])
 assert d.get("name"), "missing name"
 assert len(d["name"]) <= 25, "Odoo Apps name exceeds 25 characters"
 assert d.get("version"), "missing version"
+assert d["version"].startswith("18.0.") or d["version"].startswith("19.0."), "manifest version must match release series (18.0 or 19.0)"
 assert d.get("license") == "LGPL-3", "unexpected release license"
 assert d.get("support"), "missing support email"
 for f in d.get("data", []):
@@ -40,6 +41,20 @@ for f in d.get("images", []):
 assert (__import__("pathlib").Path(sys.argv[2]) / "static/description/index.html").is_file()
 print("  manifest OK:", d["name"], d["version"])
 PY
+
+echo "== Odoo 18 compatibility guards =="
+if grep -Rqn --include='*.py' 'models\.Constraint' "$MOD"; then
+    echo "  FAIL found Odoo 19-only models.Constraint"; fail=1
+else
+    echo "  no Odoo 19-only models.Constraint declarations"
+fi
+if grep -qn 'type="jsonrpc"' "$MOD/controllers/main.py"; then
+    echo "  FAIL found Odoo 19-only jsonrpc route type"; fail=1
+elif [ "$(grep -c 'type="json"' "$MOD/controllers/main.py")" -ne 5 ]; then
+    echo "  FAIL expected five Odoo 18 JSON agent routes"; fail=1
+else
+    echo "  five Odoo 18 JSON agent routes present"
+fi
 
 echo "== Store description =="
 python3 - "$MOD/static/description/index.html" <<'PY' || fail=1
