@@ -20,7 +20,7 @@
                                 <button name="%(action_tally_instance)d" type="action" string="Manage Tally Instances" class="btn btn-primary" icon="fa-arrow-right"/>
                             </div>
                         </setting>
-                        <setting id="tally_mappings_setting" string="Account Type Mapping" help="Map Tally group hierarchies (Sundry Debtors, Bank Accounts) to Odoo 19 Account Types.">
+                        <setting id="tally_mappings_setting" string="Account Type Mapping" help="Map Tally group hierarchies (Sundry Debtors, Bank Accounts) to Odoo 18 Account Types.">
                             <div class="mt8">
                                 <button name="%(action_tally_account_type_map)d" type="action" string="Configure Account Mappings" class="btn btn-secondary" icon="fa-table"/>
                             </div>

@@ -1,7 +1,7 @@
 # Odoo ⇄ TallyPrime Integration — Roadmap & Architecture
 
-Single native Odoo 19 module (`tally_integration`) for near-real-time, two-way sync
-between **TallyPrime** and **Odoo 19** (Enterprise or Community). Built around
+Single native Odoo 18 module (`tally_integration`) for near-real-time, two-way sync
+between **TallyPrime** and **Odoo 18** (Enterprise or Community). Built around
 configuration over customization, native Odoo operations, recoverability and security by design.
 See `ARCHITECTURE.md` and `IMPLEMENTATION_STATUS.md` for the authoritative product boundary.
 
@@ -103,7 +103,7 @@ loop-guarded (`tally_no_sync`) and wrapped in try/except — non-invasive to oth
 - **[RESOLVED] Journal & Contra Balancing**: Double-entry balance check ($\Sigma \text{Debit} = \Sigma \text{Credit}$) with automatic rounding/suspense adjustment line.
 - **[RESOLVED] Multi-Tier Master Lookups**: GUID $\rightarrow$ GSTIN / PAN / Internal Code $\rightarrow$ Company Scoped Name.
 - **[RESOLVED] Direct Connection Live Test**: `action_test_connection()` performs live HTTP XML test in direct mode and provides status notifications.
-- **[VERIFIED] Isolated Odoo 19 install and transactional tests**: fresh database installation plus engine regressions pass.
+- **[VERIFIED] Isolated Odoo 18 install and transactional tests**: fresh database installation plus engine regressions pass.
 - **[VERIFIED] Live bidirectional round trip**: clean recovery, repeat-pull idempotency, price edits
   in both directions, GST vouchers, payments, journal and Stock Journal transfer pass.
 - **[RESOLVED] Poison-record stall**: a dedicated inbound dead-letter model quarantines a repeatedly

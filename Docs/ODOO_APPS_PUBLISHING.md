@@ -4,7 +4,7 @@ Last reviewed: 2026-09-06
 
 ## 1. Release objective
 
-Publish `tally_integration` as a free LGPL-3 Odoo 19 app while keeping the repository useful to
+Publish `tally_integration` as a free LGPL-3 Odoo 18 app while keeping the repository useful to
 implementers and keeping customer data, credentials and local paths out of the public release.
 
 ## 2. Official requirements used
@@ -15,7 +15,7 @@ prohibit misleading features, JavaScript, harmful styling and unauthorized exter
 links. The guidelines say an app is free when `price` is not set and recommend LGPL-3 for open-source
 apps.
 
-Odoo's [Module Manifest documentation](https://www.odoo.com/documentation/19.0/developer/reference/backend/module.html)
+Odoo's [Module Manifest documentation](https://www.odoo.com/documentation/18.0/developer/reference/backend/module.html)
 defines manifest keys, dependencies, license, semantic version, application and installability.
 
 This checklist is a repository aid, not a substitute for re-reading the current guidelines before
@@ -24,12 +24,12 @@ submission.
 ## 3. Repository/branch structure
 
 - `main`: current stable development and documentation.
-- `19.0`: Odoo 19 release branch submitted to the Apps repository scanner.
+- `18.0`: Odoo 18 release branch submitted to the Apps repository scanner.
 - Module directory at branch root: `tally_integration/`.
-- The module manifest version starts with `19.0`.
+- The module manifest version starts with `18.0`.
 
-Before publishing, fast-forward `19.0` from the approved `main` commit and push both branches. Do not
-mix code for another Odoo major version into `19.0`.
+Before publishing, fast-forward `18.0` from the approved `main` commit and push both branches. Do not
+mix code for another Odoo major version into `18.0`.
 
 ## 4. Manifest checklist
 
@@ -54,7 +54,8 @@ mix code for another Odoo major version into `19.0`.
 - [x] Accurate supported/excluded scope.
 - [x] Free-license and optional-support model stated factually.
 - [x] Local icon and banner.
-- [x] Added 28 sanitized Odoo 19 UI screenshots covering every connector view and key synchronized results.
+- [ ] Refresh the 28 sanitized UI screenshots on Odoo 18 before publishing this branch; the current
+  screenshot catalog records their original Odoo 19 capture provenance.
 - [x] Added 15 real, sanitized TallyPrime screens covering masters, GST vouchers, returns, payments,
   journal and warehouse transfer.
 - [x] Added a 1080p two-minute live Odoo-to-Tally walkthrough, standalone/embedded English captions,
@@ -102,7 +103,7 @@ Run from repository root:
 python3 -m pytest -q tests
 ```
 
-Then run a clean target Odoo 19 install with post-install tests on a disposable database. For a
+Then run a clean target Odoo 18 install with post-install tests on a disposable database. For a
 release involving transformation or transport, also run the controlled Tally UAT.
 
 Required results:
@@ -123,11 +124,11 @@ Required results:
 4. Confirm sanitized store assets and manifest.
 5. Commit on `main` with a release-oriented message.
 6. Push `main`.
-7. Fast-forward `19.0` to the same approved commit and push it.
-8. In the Odoo Apps publisher dashboard, register/select the GitHub repository and `19.0` branch.
+7. Fast-forward `18.0` to the same approved commit and push it.
+8. In the Odoo Apps publisher dashboard, register/select the GitHub repository and `18.0` branch.
 9. Wait for scan; resolve every manifest/dependency/license/HTML warning.
 10. Inspect the live listing as a buyer would.
-11. Download the store package and install it in a clean Odoo 19 database.
+11. Download the store package and install it in a clean Odoo 18 database.
 12. Record the published URL, commit and verification date.
 
 ## 9. Store copy policy

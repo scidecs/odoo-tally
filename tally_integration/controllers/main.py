@@ -25,7 +25,7 @@ class TallyAgentController(http.Controller):
         instance._guard_environment()
         return instance if instance.active else None
 
-    @http.route("/tally/agent/heartbeat", type="jsonrpc", auth="public",
+    @http.route("/tally/agent/heartbeat", type="json", auth="public",
                 methods=["POST"], csrf=False)
     def heartbeat(self, **kw):
         instance = self._authenticate()
@@ -41,7 +41,7 @@ class TallyAgentController(http.Controller):
             "entities": [{"entity": c.entity, "last_alterid": c.last_alterid} for c in inbound],
         }
 
-    @http.route("/tally/agent/companies", type="jsonrpc", auth="public",
+    @http.route("/tally/agent/companies", type="json", auth="public",
                 methods=["POST"], csrf=False)
     def companies(self, companies=None, **kw):
         """Agent reports the Tally company files it can currently see."""
@@ -63,7 +63,7 @@ class TallyAgentController(http.Controller):
                 })
         return {"ok": True, "count": len(clean_names)}
 
-    @http.route("/tally/agent/pull", type="jsonrpc", auth="public",
+    @http.route("/tally/agent/pull", type="json", auth="public",
                 methods=["POST"], csrf=False)
     def pull(self, limit=50, **kw):
         """Agent pulls pending outbound (Odoo -> Tally) work."""
@@ -90,7 +90,7 @@ class TallyAgentController(http.Controller):
             "payload": item.payload,
         } for item in items]}
 
-    @http.route("/tally/agent/push", type="jsonrpc", auth="public",
+    @http.route("/tally/agent/push", type="json", auth="public",
                 methods=["POST"], csrf=False)
     def push(self, entity=None, alterid=None, records=None, xml_payload=None, **kw):
         """Agent pushes Tally -> Odoo deltas (as structured records or raw XML)."""
@@ -150,7 +150,7 @@ class TallyAgentController(http.Controller):
             "watermark": result.get("watermark", 0),
         }
 
-    @http.route("/tally/agent/ack", type="jsonrpc", auth="public",
+    @http.route("/tally/agent/ack", type="json", auth="public",
                 methods=["POST"], csrf=False)
     def ack(self, results=None, **kw):
         """Agent acknowledges outbound items it wrote into Tally."""

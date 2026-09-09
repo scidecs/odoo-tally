@@ -6,7 +6,7 @@
   <text x="840" y="171" text-anchor="middle" fill="#C8D1E8" font-family="Arial, sans-serif" font-size="20">Configuration, dispatch, acknowledgement and synchronized result</text>
   <g filter="url(#shadow)"><rect x="78" y="232" width="640" height="576" rx="22" fill="#FFFFFF"/><rect x="872" y="232" width="730" height="576" rx="22" fill="#FFFFFF"/></g>
   <rect x="78" y="232" width="640" height="62" rx="22" fill="#714B67"/><rect x="78" y="272" width="640" height="22" fill="#714B67"/>
-  <image href="odoo_logo.png" x="106" y="242" width="94" height="42" preserveAspectRatio="xMidYMid meet"/><text x="222" y="272" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="20" font-weight="700">ODOO 19 • SYNC POLICY</text>
+  <image href="odoo_logo.png" x="106" y="242" width="94" height="42" preserveAspectRatio="xMidYMid meet"/><text x="222" y="272" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="20" font-weight="700">ODOO 18 • SYNC POLICY</text>
   <image href="../screenshots/17_entity_configuration.jpg" x="92" y="308" width="612" height="501" preserveAspectRatio="xMidYMid meet"/>
   <rect x="872" y="232" width="730" height="62" rx="22" fill="#F4BE43"/><rect x="872" y="272" width="730" height="22" fill="#F4BE43"/>
   <image href="tallyprime_logo.png" x="900" y="242" width="132" height="42" preserveAspectRatio="xMidYMid meet"/><text x="1057" y="272" fill="#101B44" font-family="Arial, sans-serif" font-size="20" font-weight="700">SYNCHRONIZED STOCK ITEM</text>

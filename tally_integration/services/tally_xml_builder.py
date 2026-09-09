@@ -231,8 +231,11 @@ def build_stock_group_xml(name, parent=None, guid=None):
 def build_stock_item_xml(name, base_uom="Nos", parent_group="Primary", hsn_code=None,
                          gst_rate=0.0, standard_cost=0.0, sale_price=0.0,
                          opening_qty=0.0, opening_rate=0.0, guid=None,
-                         part_no=None, barcode=None, effective_date=None):
+                         part_no=None, barcode=None, effective_date=None,
+                         action="Create"):
     """Build <STOCKITEM> XML."""
+    if action not in ("Create", "Alter"):
+        raise ValueError("Stock item action must be Create or Alter")
     guid_tag = f'<GUID>{xml_escape(guid)}</GUID>' if guid else ''
     hsn_tag = f'<HSNCODE>{xml_escape(hsn_code)}</HSNCODE>' if hsn_code else ''
     gst_tag = f'<GSTRATEDETAILS.LIST><GSTRATE>{float(gst_rate or 0.0):.2f}</GSTRATE></GSTRATEDETAILS.LIST>' if gst_rate else ''
@@ -255,7 +258,7 @@ def build_stock_item_xml(name, base_uom="Nos", parent_group="Primary", hsn_code=
     parent_tag = f"<PARENT>{xml_escape(parent_group)}</PARENT>" if parent_group and parent_group != "Primary" else "<PARENT/>"
 
     return f"""<TALLYMESSAGE xmlns:UDF="TallyUDF">
-  <STOCKITEM NAME="{xml_escape(name)}" ACTION="Create">
+  <STOCKITEM NAME="{xml_escape(name)}" ACTION="{action}">
     {guid_tag}
     <NAME>{xml_escape(name)}</NAME>
     {parent_tag}

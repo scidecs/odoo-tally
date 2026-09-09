@@ -27,7 +27,7 @@ missing alt text, external image assets and JavaScript.
 
 ## 3. Odoo transactional test command
 
-Use a disposable database and the actual Odoo 19 runtime:
+Use a disposable database and the actual Odoo 18 runtime:
 
 ```bash
 odoo-bin \
@@ -58,6 +58,9 @@ Current regression coverage includes:
 - Zero closing stock remains zero.
 - Repeated total stock pulls preserve secondary-location quantity and total idempotency.
 - Dated standard cost/price lists.
+- Recovered stock-item updates use Tally `Alter` semantics instead of recreating an existing GUID.
+- Authenticated agent heartbeat, company discovery, raw XML push, queue lease and acknowledgement
+  over real HTTP routes.
 - Outbound payment queue behavior.
 - Opening-balance balancing.
 - Inbound and outbound Stock Journal transfer behavior.
@@ -65,7 +68,25 @@ Current regression coverage includes:
 - Sales, purchase and both return payload balance with tax.
 - XML attribute escaping and parser normalization.
 
-## 5. Reference live scenario
+## 5. Odoo 18 live round-trip scenario
+
+On 2026-09-09 the `RT180909A` scenario was executed with exact Odoo 18 Community and Enterprise
+source checkouts against a LAN-hosted TallyPrime test company:
+
+- 39 initial outbound payloads acknowledged and zero failed.
+- 15/15 stock items re-exported from Tally with matching SKU, category, cost and selling price.
+- A second blank Odoo 18 Enterprise database pulled 262 records and created 247 identity mappings.
+- 15/15 products, six invoices/notes, two payments, one journal and one internal transfer recovered.
+- Amounts, GST, product quantities, costs, prices, SKUs and categories matched the source snapshot.
+- Repeat pull remained stable with no duplicate business documents and zero sync errors.
+- A Tally selling-price edit reached Odoo, and an Odoo selling-price edit reached Tally.
+
+The complete machine-readable evidence is retained outside the public repository because raw
+accounting exports and environment configuration must not be shipped in an Apps package. See
+[Odoo 18 Validation Report](ODOO18_VALIDATION_REPORT.md) for the exact runtime and acceptance
+summary.
+
+## 6. Earlier Odoo 19 reference scenario
 
 The validated `RT260904F` scenario used:
 
@@ -93,20 +114,21 @@ See `tally_integration/FINAL_VALIDATION_REPORT.md` for evidence filenames and ba
 the development environment. Database dumps and accounting XML must not be included in a public
 Odoo Apps release.
 
-## 6. Portable live test setup
+## 7. Portable live test setup
 
 The live utilities require an Odoo source checkout and a local Odoo config. Do not edit a personal
 absolute path into the repository.
 
 ```bash
 export ODOO_SRC=/path/to/odoo-src
+export ROUNDTRIP_PREFIX=RT-YOUR-UNIQUE-PREFIX
 python3 scripts/live_roundtrip_scenario.py --help
 ```
 
 The scenario script is destructive by design. Use only with an explicitly disposable/backed-up
 Tally company and Odoo database. Its default fixture names are not client data.
 
-## 7. Customer UAT acceptance matrix
+## 8. Customer UAT acceptance matrix
 
 | Area | Acceptance evidence |
 |---|---|
@@ -126,7 +148,7 @@ Tally company and Odoo database. Its default fixture names are not client data.
 | Performance | Agreed volume completes inside operational window |
 | Security | Token, gateway, ACL and backup controls approved |
 
-## 8. Reconciliation queries
+## 9. Reconciliation queries
 
 For each UAT batch compare:
 
@@ -140,7 +162,7 @@ For each UAT batch compare:
 
 Use tolerances only where currency/UoM rounding policy explicitly permits them.
 
-## 9. Negative tests
+## 10. Negative tests
 
 Include:
 
@@ -156,7 +178,7 @@ Include:
 - Database clone restored in a different environment.
 - Simultaneous edits under each source policy.
 
-## 10. Scale and soak gate
+## 11. Scale and soak gate
 
 Before unsupervised enterprise use:
 
@@ -169,7 +191,7 @@ Before unsupervised enterprise use:
 
 This gate is not replaced by the functional 15-product scenario.
 
-## 11. Release sign-off
+## 12. Release sign-off
 
 Sign-off should name:
 

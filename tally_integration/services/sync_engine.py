@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Sync Engine Service for TallyPrime <-> Odoo 19.
+"""Sync Engine Service for TallyPrime <-> Odoo 18.
 
 Handles:
 - Orchestrating inbound Tally -> Odoo records (Masters & Vouchers)
@@ -570,10 +570,26 @@ class SyncEngine:
         Uom = self.env["uom.uom"]
         rec = Uom.search([("name", "=ilike", name)], limit=1)
         if not rec:
-            rec = Uom.create({
+            vals = {
                 "name": name,
                 "rounding": 1.0 / (10 ** int(data.get("decimal_places") or 0)),
-            })
+            }
+            # Odoo 18 requires every UoM to belong to a category and permits
+            # only one reference UoM per category. A Tally simple unit does
+            # not carry a safe conversion ratio to an existing Odoo category,
+            # so give each imported unit its own category. Odoo 19 removed
+            # this field, therefore the guard also keeps the code portable.
+            if "category_id" in Uom._fields:
+                category_name = "Tally unit: %s" % name
+                category = self.env["uom.category"].search([
+                    ("name", "=ilike", category_name),
+                ], limit=1)
+                if not category:
+                    category = self.env["uom.category"].create({
+                        "name": category_name,
+                    })
+                vals["category_id"] = category.id
+            rec = Uom.create(vals)
         return rec
 
     def _upsert_stock_group(self, data):
@@ -1406,8 +1422,11 @@ class SyncEngine:
         else:
             account_type = self._map_tally_group_to_account_type(parent)
             account = self._get_or_create_account(name, default_type=account_type)
+        # ``equity_unaffected`` is the unique Current Year Earnings account in
+        # Odoo 18. Opening-balance clearing is ordinary equity and must not try
+        # to create a second Current Year Earnings account.
         counterpart = self._get_or_create_account(
-            "Tally Opening Balance Equity", default_type="equity_unaffected")
+            "Tally Opening Balance Equity", default_type="equity")
         journal = self._get_or_create_journal("general")
         identity = data.get("guid") or name
         ref = "TALLY-OPEN-%s" % identity
@@ -1488,8 +1507,10 @@ class SyncEngine:
             source = self._upsert_godown({"name": source_line.get("godown") or "Main Location"})
             destination = self._upsert_godown({"name": destination_line.get("godown") or "Main Location"})
             move_commands.append((0, 0, {
-                # Odoo 19 replaced stock.move.name with the picking
-                # description field.
+                # Odoo 18 requires ``stock.move.name``. Keep
+                # ``description_picking`` too so the description shown on the
+                # transfer matches the Tally stock item.
+                "name": source_line.get("item") or ref,
                 "description_picking": source_line.get("item") or ref,
                 "product_id": product.id,
                 "product_uom_qty": abs(float(source_line.get("qty") or 0.0)),

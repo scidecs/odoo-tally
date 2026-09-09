@@ -35,10 +35,11 @@ class TallyInboundDeadLetter(models.Model):
     last_failed = fields.Datetime(default=fields.Datetime.now, required=True)
     resolved_date = fields.Datetime()
 
-    _record_revision_uniq = models.Constraint(
-        "UNIQUE(instance_id, entity, record_key, tally_alterid)",
-        "This inbound Tally record revision is already tracked.",
-    )
+    _sql_constraints = [
+        ("record_revision_uniq",
+         "UNIQUE(instance_id, entity, record_key, tally_alterid)",
+         "This inbound Tally record revision is already tracked."),
+    ]
 
     @api.model
     def _identity(self, entity, record):
@@ -109,4 +110,3 @@ class TallyInboundDeadLetter(models.Model):
 
     def action_resolve(self):
         self.write({"state": "resolved", "resolved_date": fields.Datetime.now()})
-

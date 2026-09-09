@@ -33,10 +33,10 @@ class TallyMapping(models.Model):
         help="Flagged when this record is no longer found in Tally during reconciliation.")
     orphan_date = fields.Datetime(string="Marked Orphan Date")
 
-    _guid_uniq = models.Constraint(
-        "UNIQUE(instance_id, entity, tally_guid)",
-        "This Tally GUID is already mapped for this entity.",
-    )
+    _sql_constraints = [
+        ("guid_uniq", "UNIQUE(instance_id, entity, tally_guid)",
+         "This Tally GUID is already mapped for this entity."),
+    ]
 
     @api.model
     def outbound_guid(self, instance, entity, model_name, res_id):

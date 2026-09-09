@@ -1,6 +1,6 @@
 # Complete Feature Catalog
 
-This is the canonical public inventory of the Odoo 19 TallyPrime Integration. It is derived from
+This is the canonical public inventory of the Odoo 18 TallyPrime Integration. It is derived from
 the shipped models, services, views, access rules, scheduled jobs and test suite. A check in this
 catalog means the standard structure is implemented; customer-specific TDL, voucher classes,
 ledger conventions and historical data still require UAT.

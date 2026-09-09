@@ -3,22 +3,22 @@
     "name": "Odoo Tally Connector",
     "summary": "Free two-way Odoo TallyPrime integration for GST, invoices, inventory and payments",
     "description": """
-Odoo Tally Connector | TallyPrime Integration for Odoo 19
+Odoo Tally Connector | TallyPrime Integration for Odoo 18
 ==========================================================
 A native Odoo Tally connector for near-real-time, two-way synchronization between TallyPrime
-and Odoo 19 Community or Enterprise on Odoo.sh and on-premise. Configure Tally-first, Odoo-first,
+and Odoo 18 Community or Enterprise on Odoo.sh and on-premise. Configure Tally-first, Odoo-first,
 one-way or serialized bidirectional synchronization independently for every supported entity.
 
-* Supported master data: groups, general accounts, parties, units of measure, stock groups,
-  stock items, godowns/locations, cost centres, taxes, and currencies.
-* Supported transactions: sales invoices, credit notes, purchase bills, debit notes,
-  receipts, payments, journal/contra vouchers, and internal stock transfers.
-* Configurable source of truth: Tally-first, Odoo-first, or bidirectional with serialized
-  processing and SHA-256 echo/loop suppression.
-* Outbound queue and token-authenticated controllers for the optional on-prem sync agent.
-* Native Odoo list, pivot, and graph views for synchronization monitoring.
+Supported master data includes groups, general accounts, parties, units of measure, stock groups,
+stock items, godowns/locations, cost centres, taxes, and currencies. Supported transactions include
+sales invoices, credit notes, purchase bills, debit notes, receipts, payments, journal/contra
+vouchers, and internal stock transfers.
+
+Configure Tally-first, Odoo-first, or bidirectional ownership with serialized processing and
+SHA-256 echo suppression. The module includes a durable outbound queue, token-authenticated routes
+for the optional on-premise agent, and native list, pivot, and graph monitoring views.
 """,
-    "version": "19.0.1.1.0",
+    "version": "18.0.1.0.0",
     "category": "Accounting",
     "author": "Scidecs",
     "maintainer": "Scidecs",

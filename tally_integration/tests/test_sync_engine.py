@@ -148,7 +148,12 @@ class TestTallySyncEngine(TransactionCase):
 
     def test_odoo_owned_mapping_rejects_inbound_overwrite(self):
         self._config("uom", direction="both", source="odoo")
-        uom = self.env["uom.uom"].create({"name": "Owned Unit", "rounding": 1.0})
+        uom_vals = {"name": "Owned Unit", "rounding": 1.0}
+        if "category_id" in self.env["uom.uom"]._fields:
+            uom_vals["category_id"] = self.env["uom.category"].create({
+                "name": "Owned Unit Category",
+            }).id
+        uom = self.env["uom.uom"].create(uom_vals)
         guid = "44444444-4444-4444-4444-444444444444"
         mapping = self.env["tally.mapping"].create({
             "instance_id": self.instance.id, "entity": "uom", "tally_guid": guid,
@@ -160,6 +165,16 @@ class TestTallySyncEngine(TransactionCase):
         self.assertEqual(result["processed"], 0)
         self.assertEqual(uom.name, "Owned Unit")
         self.assertEqual(mapping.last_origin, "odoo")
+
+    def test_inbound_uom_creates_valid_odoo18_category(self):
+        uom = SyncEngine(self.env, self.instance)._upsert_uom({
+            "name": "Tally Boxes", "decimal_places": 2,
+        })
+        self.assertTrue(uom)
+        self.assertEqual(uom.rounding, 0.01)
+        if "category_id" in uom._fields:
+            self.assertTrue(uom.category_id)
+            self.assertEqual(uom.category_id.name, "Tally unit: Tally Boxes")
 
     def test_inventory_invoice_does_not_duplicate_sales_ledger(self):
         self._config("sales", direction="both", source="tally")
@@ -304,7 +319,12 @@ class TestTallySyncEngine(TransactionCase):
     def test_outbound_master_hooks_enqueue_once(self):
         for entity in ("uom", "stock_group", "godown"):
             self._config(entity, direction="both", source="odoo")
-        uom = self.env["uom.uom"].create({"name": "Cartons Test", "rounding": 0.01})
+        uom_vals = {"name": "Cartons Test", "rounding": 0.01}
+        if "category_id" in self.env["uom.uom"]._fields:
+            uom_vals["category_id"] = self.env["uom.category"].create({
+                "name": "Cartons Test Category",
+            }).id
+        uom = self.env["uom.uom"].create(uom_vals)
         category = self.env["product.category"].create({"name": "Roundtrip Category"})
         warehouse = self.env["stock.warehouse"].search([
             ("company_id", "=", self.env.company.id),
@@ -369,6 +389,29 @@ class TestTallySyncEngine(TransactionCase):
         self.assertEqual(root.findtext(".//STANDARDPRICELIST.LIST/DATE"), "20260905")
         self.assertEqual(root.findtext(".//STANDARDPRICELIST.LIST/RATE"), "100.00")
 
+    def test_recovered_stock_item_update_uses_alter(self):
+        self._config("stock_item", direction="both", source="bidirectional")
+        product = self.env["product.product"].with_context(tally_no_sync=True).create({
+            "name": "Recovered Stock Item", "is_storable": True,
+            "standard_price": 80.0, "list_price": 100.0,
+            "company_id": self.env.company.id,
+        })
+        self.env["tally.mapping"].create({
+            "instance_id": self.instance.id, "entity": "stock_item",
+            "tally_guid": "tally-recovered-stock-guid",
+            "odoo_model_name": product._name, "odoo_res_id": product.id,
+            "last_origin": "tally",
+        })
+        product = product.with_context(tally_no_sync=False)
+        product.product_tmpl_id.write({"list_price": 107.0})
+        queue = self.env["tally.sync.queue"].search([
+            ("instance_id", "=", self.instance.id), ("entity", "=", "stock_item"),
+            ("odoo_model_name", "=", product._name), ("odoo_res_id", "=", product.id),
+            ("state", "=", "pending"),
+        ], limit=1)
+        self.assertIn('ACTION="Alter"', queue.payload)
+        self.assertIn("<PARENT>", queue.payload)
+
     def test_completed_internal_transfer_enqueues_stock_journal(self):
         self._config("stock_journal", direction="both", source="odoo")
         warehouse = self.env["stock.warehouse"].search([
@@ -395,7 +438,8 @@ class TestTallySyncEngine(TransactionCase):
             "picking_type_id": warehouse.int_type_id.id,
             "location_id": source.id, "location_dest_id": destination.id,
             "move_ids": [(0, 0, {
-                "description_picking": product.name, "product_id": product.id,
+                "name": product.name, "description_picking": product.name,
+                "product_id": product.id,
                 "product_uom_qty": 2.0, "product_uom": product.uom_id.id,
                 "location_id": source.id, "location_dest_id": destination.id,
             })],

@@ -106,7 +106,7 @@ Primary terms:
 
 - Odoo Tally Connector
 - Odoo Tally Integration
-- TallyPrime Integration for Odoo 19
+- TallyPrime Integration for Odoo 18
 - Odoo to Tally sync
 - Tally to Odoo sync
 - bidirectional Tally synchronization

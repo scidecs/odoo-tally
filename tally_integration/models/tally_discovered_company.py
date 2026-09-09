@@ -24,10 +24,10 @@ class TallyDiscoveredCompany(models.Model):
         default="new", index=True)
     last_seen = fields.Datetime(readonly=True)
 
-    _name_uniq = models.Constraint(
-        "UNIQUE(reporter_instance_id, name)",
-        "This Tally company is already listed for this reporting instance.",
-    )
+    _sql_constraints = [
+        ("name_uniq", "UNIQUE(reporter_instance_id, name)",
+         "This Tally company is already listed for this reporting instance."),
+    ]
 
     def action_create_instance(self):
         """Create (or link) a tally.instance for this Tally company."""

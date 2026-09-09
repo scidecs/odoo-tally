@@ -2,7 +2,32 @@
 
 All notable public changes to the Scidecs Odoo–TallyPrime integration are documented here.
 
-## Unreleased
+## 18.0.1.0.0 — 2026-09-09
+
+### Added
+
+- Odoo 18 Community and Enterprise compatibility branch and target-version documentation.
+- Exact-runtime Odoo 18 Enterprise clean-install, post-install, HTTP agent-route, UI, live Tally
+  round-trip, fresh-database recovery, repeat-pull and bidirectional-edit validation.
+- Odoo 18 compatibility guards in the release checks and an environment-selectable live-scenario
+  prefix for collision-free validation runs.
+
+### Corrected
+
+- Replaced Odoo 19-only `models.Constraint` declarations with Odoo 18 SQL constraints.
+- Restored Odoo 18 JSON controller route declarations, required stock-move names, required imported
+  UoM categories and valid opening-balance equity account types.
+- Existing mapped stock-item updates now use Tally `Alter` semantics, protecting hierarchy and
+  other structural fields from recreate behavior.
+
+### Validated
+
+- 8 standalone transformation tests and 23 Odoo post-install methods / 27 framework counts passed.
+- Live Tally accepted 39 outbound records with zero failures; native export matched 15/15 products.
+- A blank Odoo 18 Enterprise database processed 262 inbound records, created 247 mappings and
+  recovered the complete reference scenario with zero sync errors.
+
+The Odoo 18 release details are in `Docs/ODOO18_VALIDATION_REPORT.md`.
 
 ### Corrected
 

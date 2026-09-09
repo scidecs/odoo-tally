@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="800" viewBox="0 0 1600 800" role="img" aria-labelledby="title desc">
-  <title id="title">Scidecs Odoo 19 and TallyPrime integration</title>
+  <title id="title">Scidecs Odoo 18 and TallyPrime integration</title>
   <desc id="desc">A live-validated open-source connector linking Odoo operations with TallyPrime accounting</desc>
   <defs>
     <linearGradient id="rail" x1="0" y1="0" x2="1" y2="0">
@@ -29,7 +29,7 @@
       <text x="128" y="86" fill="#ffffff" font-size="25" font-weight="700" letter-spacing="0.5">SCIDECS</text>
       <line x1="258" y1="70" x2="296" y2="70" stroke="#4ed2df" stroke-width="2"/>
       <text x="311" y="80" fill="#9eb0ca" font-size="14" font-weight="700" letter-spacing="2.2">CONNECT</text>
-      <text x="1528" y="80" fill="#9eb0ca" font-size="14" font-weight="700" letter-spacing="1.8" text-anchor="end">ODOO 19  /  TALLYPRIME</text>
+      <text x="1528" y="80" fill="#9eb0ca" font-size="14" font-weight="700" letter-spacing="1.8" text-anchor="end">ODOO 18  /  TALLYPRIME</text>
 
       <!-- Editorial message -->
       <text x="72" y="198" fill="#ffffff" font-size="62" font-weight="700">Odoo operations.</text>

@@ -13,11 +13,11 @@
 **Commercial model:** Optional paid consultation, implementation, migration, training, support and
 custom development
 
-**Release:** Odoo 19
+**Release:** Odoo 18
 
 ### One-line positioning
 
-A free, transparent and recoverable Odoo 19–TallyPrime synchronization foundation for organizations
+A free, transparent and recoverable Odoo 18–TallyPrime synchronization foundation for organizations
 that want to keep their existing finance workflow while reducing duplicate entry.
 
 ### Short description
@@ -41,7 +41,7 @@ Alternative headlines:
 
 ### Interest — explain the mechanism
 
-Scidecs Tally Prime Integration connects Odoo 19 to the native TallyPrime XML gateway. It can move
+Scidecs Tally Prime Integration connects Odoo 18 to the native TallyPrime XML gateway. It can move
 supported masters, invoices, bills, notes, payments, journals and internal transfers. Each domain
 has its own direction and source-of-truth policy, so the connector adapts to the organization's
 actual operating model instead of assuming one system always wins.
@@ -61,7 +61,7 @@ content hashes and durable work queues make synchronization inspectable and reco
 
 ### Action — responsible conversion
 
-Download the free LGPL module, install it in a test Odoo 19 database and complete the documented UAT
+Download the free LGPL module, install it in a test Odoo 18 database and complete the documented UAT
 against a backed-up Tally company. Organizations that want accountable mapping, migration, security,
 training or cutover support can contact [hello@scidecs.com](mailto:hello@scidecs.com).
 
@@ -100,7 +100,7 @@ Poor fit without additional implementation:
 
 The product story must use evidence already available:
 
-- Clean Odoo 19 install and transactional test result.
+- Clean Odoo 18 install and transactional test result.
 - Real TallyPrime import/export rather than only mocked XML.
 - 15-product scenario spanning purchase, sale, returns, taxes, payments, journal and godown transfer.
 - Fresh-database recovery and repeat-pull idempotency.
@@ -185,7 +185,7 @@ assessment rather than promising standard support.
 
 ### 50-word version
 
-Connect Odoo 19 and TallyPrime with a free LGPL connector built for controlled, recoverable data
+Connect Odoo 18 and TallyPrime with a free LGPL connector built for controlled, recoverable data
 exchange. Synchronize supported masters, accounting vouchers, GST, payments and internal transfers
 through direct or private-LAN agent deployment—with stable identity, audit logs, retries and inbound
 quarantine. Customer UAT is required before production.
@@ -193,7 +193,7 @@ quarantine. Customer UAT is required before production.
 ### 100-word version
 
 Scidecs Tally Prime Integration helps businesses keep Odoo operations and TallyPrime accounting
-aligned without paying a connector license. The free Odoo 19 addon supports configurable one-way or
+aligned without paying a connector license. The free Odoo 18 addon supports configurable one-way or
 bidirectional synchronization for core masters, invoices, bills, returns, payments, journals,
 opening balances and internal transfers. It communicates through Tally's native XML gateway either
 directly or through an outbound-only local agent. Stable GUIDs, content hashes, durable queues,
