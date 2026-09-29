@@ -3,10 +3,10 @@
     "name": "Odoo Tally Connector",
     "summary": "Free two-way Odoo TallyPrime integration for GST, invoices, inventory and payments",
     "description": """
-Odoo Tally Connector | TallyPrime Integration for Odoo 19
+Odoo Tally Connector | TallyPrime Integration for Odoo 20
 ==========================================================
 A native Odoo Tally connector for near-real-time, two-way synchronization between TallyPrime
-and Odoo 19 Community or Enterprise on Odoo.sh and on-premise. Configure Tally-first, Odoo-first,
+and Odoo 20 Community or Enterprise on Odoo.sh and on-premise. Configure Tally-first, Odoo-first,
 one-way or serialized bidirectional synchronization independently for every supported entity.
 
 Supported master data includes groups, general accounts, parties, units of measure, stock groups,
@@ -18,7 +18,7 @@ Configure Tally-first, Odoo-first, or bidirectional ownership with serialized pr
 SHA-256 echo suppression. The module includes a durable outbound queue, token-authenticated routes
 for the optional on-premise agent, and native list, pivot, and graph monitoring views.
 """,
-    "version": "19.0.1.2.0",
+    "version": "20.0.1.2.0",
     "category": "Accounting",
     "author": "Scidecs",
     "maintainer": "Scidecs",
@@ -29,8 +29,7 @@ for the optional on-premise agent, and native list, pivot, and graph monitoring 
     "depends": ["base", "mail", "account", "uom", "product", "stock", "analytic"],
     "data": [
         "security/tally_security.xml",
-        "security/ir.model.access.csv",
-        "security/ir_rule_data.xml",
+        "security/ir.access.csv",
         "data/ir_cron_data.xml",
         "data/tally_account_type_map_data.xml",
         "views/tally_instance_views.xml",
