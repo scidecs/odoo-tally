@@ -28,7 +28,7 @@ d = ast.literal_eval(src[src.index("{"):])
 assert d.get("name"), "missing name"
 assert len(d["name"]) <= 25, "Odoo Apps name exceeds 25 characters"
 assert d.get("version"), "missing version"
-assert d["version"].startswith("18.0.") or d["version"].startswith("19.0."), "manifest version must match release series (18.0 or 19.0)"
+assert d["version"].split(".")[0] in ("18", "19", "20") and d["version"][2:4] == ".0", "manifest version must match a release series (18.0, 19.0 or 20.0)"
 assert d.get("license") == "LGPL-3", "unexpected release license"
 assert d.get("support"), "missing support email"
 for f in d.get("data", []):

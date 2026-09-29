@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 {
-    "name": "Odoo Tally Connector",
-    "summary": "Free two-way Odoo TallyPrime integration for GST, invoices, inventory and payments",
+    "name": "Odoo Tally Integration",
+    "summary": "Free Tally connector for Odoo and Tally Prime: two-way Odoo Tally sync of GST invoices, payments, ledgers and inventory via the Tally XML API",
     "description": """
-Odoo Tally Connector | TallyPrime Integration for Odoo 20
+Odoo Tally Connector | Tally Prime Integration for Odoo 20
 ==========================================================
-A native Odoo Tally connector for near-real-time, two-way synchronization between TallyPrime
-and Odoo 20 Community or Enterprise on Odoo.sh and on-premise. Configure Tally-first, Odoo-first,
-one-way or serialized bidirectional synchronization independently for every supported entity.
+A free, native Odoo Tally connector for near-real-time, two-way Odoo Tally sync between Tally Prime
+and Odoo 20 Community or Enterprise, on Odoo.sh or on-premise. The Tally integration talks to the
+Tally XML API (the TallyPrime gateway on port 9000, also exposed by Tally ERP 9) directly or through
+an outbound-only agent. Configure Tally-first, Odoo-first, one-way or serialized bidirectional
+synchronization independently for every supported entity.
 
 Supported master data includes groups, general accounts, parties, units of measure, stock groups,
 stock items, godowns/locations, cost centres, taxes, and currencies. Supported transactions include
