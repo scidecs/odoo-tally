@@ -27,6 +27,15 @@ class TestTallySyncEngine(TransactionCase):
             "direct_auto_pull": False,
         })
 
+    def _uom(self, name, rounding=1.0, no_sync=False):
+        vals = {"name": name}
+        Uom = self.env["uom.uom"].with_context(tally_no_sync=no_sync)
+        if "rounding" in Uom._fields:
+            vals["rounding"] = rounding
+        if "category_id" in Uom._fields:
+            vals["category_id"] = self.env["uom.category"].create({"name": name + " Category"}).id
+        return Uom.create(vals)
+
     def _config(self, entity, direction="tally_to_odoo", source="tally"):
         return self.env["tally.entity.config"].create({
             "instance_id": self.instance.id,
@@ -82,6 +91,7 @@ class TestTallySyncEngine(TransactionCase):
             "instance_id": self.instance.id,
             "entity": "uom",
             "tally_guid": "echo-uom",
+            "tally_alterid": 7,
             "odoo_model_name": "uom.uom",
             "odoo_res_id": self.env.ref("uom.product_uom_unit").id,
             "last_origin": "odoo",
@@ -108,9 +118,17 @@ class TestTallySyncEngine(TransactionCase):
             "last_origin": "tally",
             "content_hash": "inbound",
         })
+        mapping.odoo_fingerprint = "unchanged-document"
+        # Same accounting content as imported: posting/re-saving never writes back.
         self.assertFalse(self.env["tally.mapping"].register_outbound(
             self.instance, "ledger", partner._name, partner.id, "<changed/>",
-            guid=mapping.tally_guid, allow_tally_origin=False))
+            guid="remote", fingerprint="unchanged-document"))
+        # Tally-owned entity: never written back, even when edited.
+        self.env["tally.entity.config"].search([
+            ("instance_id", "=", self.instance.id), ("entity", "=", "ledger")]).source_of_truth = "tally"
+        self.assertFalse(self.env["tally.mapping"].register_outbound(
+            self.instance, "ledger", partner._name, partner.id, "<edited/>",
+            guid="remote", fingerprint="edited-document"))
 
     def test_outbound_guid_preserves_real_tally_identity(self):
         self._config("account_ledger", direction="both", source="odoo")
@@ -124,11 +142,15 @@ class TestTallySyncEngine(TransactionCase):
             "tally_guid": real_guid, "odoo_model_name": account._name,
             "odoo_res_id": account.id, "last_origin": "tally",
         })
-        self.assertEqual(
-            self.env["tally.mapping"].outbound_guid(
-                self.instance, "account_ledger", account._name, account.id),
-            real_guid,
-        )
+        Mapping = self.env["tally.mapping"]
+        Mapping.search([("tally_guid", "=", real_guid)]).tally_name = "Ledger Name In Tally"
+        guid = Mapping.outbound_guid(self.instance, "account_ledger", account._name, account.id)
+        # Tally ignores GUIDs on import, so Odoo sends its own stable id and
+        # addresses the existing ledger by its Tally name.
+        self.assertNotEqual(guid, real_guid)
+        self.assertEqual(guid, Mapping.outbound_guid(self.instance, "account_ledger", account._name, account.id))
+        address = Mapping.outbound_address(self.instance, "account_ledger", account._name, account.id)
+        self.assertEqual(address["name"], "Ledger Name In Tally")
 
     def test_outbound_guid_upgrades_legacy_synthetic_identity(self):
         self._config("account_ledger", direction="both", source="odoo")
@@ -148,12 +170,7 @@ class TestTallySyncEngine(TransactionCase):
 
     def test_odoo_owned_mapping_rejects_inbound_overwrite(self):
         self._config("uom", direction="both", source="odoo")
-        uom_vals = {"name": "Owned Unit", "rounding": 1.0}
-        if "category_id" in self.env["uom.uom"]._fields:
-            uom_vals["category_id"] = self.env["uom.category"].create({
-                "name": "Owned Unit Category",
-            }).id
-        uom = self.env["uom.uom"].create(uom_vals)
+        uom = self._uom("Owned Unit", no_sync=True)
         guid = "44444444-4444-4444-4444-444444444444"
         mapping = self.env["tally.mapping"].create({
             "instance_id": self.instance.id, "entity": "uom", "tally_guid": guid,
@@ -164,14 +181,15 @@ class TestTallySyncEngine(TransactionCase):
             "uom", [{"name": "Tally Rename", "guid": guid, "alterid": 7}])
         self.assertEqual(result["processed"], 0)
         self.assertEqual(uom.name, "Owned Unit")
-        self.assertEqual(mapping.last_origin, "odoo")
+        self.assertEqual(mapping.tally_alterid, 7)
 
     def test_inbound_uom_creates_valid_odoo18_category(self):
         uom = SyncEngine(self.env, self.instance)._upsert_uom({
             "name": "Tally Boxes", "decimal_places": 2,
         })
         self.assertTrue(uom)
-        self.assertEqual(uom.rounding, 0.01)
+        if "rounding" in uom._fields:
+            self.assertEqual(uom.rounding, 0.01)
         if "category_id" in uom._fields:
             self.assertTrue(uom.category_id)
             self.assertEqual(uom.category_id.name, "Tally unit: Tally Boxes")
@@ -186,12 +204,12 @@ class TestTallySyncEngine(TransactionCase):
             "party_ledger": "Invoice Test Customer",
             "guid": "22222222-2222-2222-2222-222222222222",
             "ledger_entries": [
-                {"ledger": "Invoice Test Customer", "amount": 100.0},
-                {"ledger": "Sales Account", "amount": -100.0},
+                {"ledger": "Invoice Test Customer", "amount": -100.0},
+                {"ledger": "Sales Account", "amount": 100.0},
             ],
             "inventory_entries": [
                 {"item": "Invoice Test Item", "qty": 1.0, "rate": 100.0,
-                 "amount": -100.0, "uom": "Units"},
+                 "amount": 100.0, "uom": "Units", "account_ledger": "Sales Account"},
             ],
         })
         self.assertEqual(move.amount_untaxed, 100.0)
@@ -319,12 +337,7 @@ class TestTallySyncEngine(TransactionCase):
     def test_outbound_master_hooks_enqueue_once(self):
         for entity in ("uom", "stock_group", "godown"):
             self._config(entity, direction="both", source="odoo")
-        uom_vals = {"name": "Cartons Test", "rounding": 0.01}
-        if "category_id" in self.env["uom.uom"]._fields:
-            uom_vals["category_id"] = self.env["uom.category"].create({
-                "name": "Cartons Test Category",
-            }).id
-        uom = self.env["uom.uom"].create(uom_vals)
+        uom = self._uom("Cartons Test", 0.01)
         category = self.env["product.category"].create({"name": "Roundtrip Category"})
         warehouse = self.env["stock.warehouse"].search([
             ("company_id", "=", self.env.company.id),
@@ -434,11 +447,12 @@ class TestTallySyncEngine(TransactionCase):
             "name": "Outbound Transfer Product", "is_storable": True,
             "standard_price": 25.0, "company_id": self.env.company.id,
         })
+        from ..models.compat import move_uom_field
         move_vals = {
             "description_picking": product.name,
             "product_id": product.id,
             "product_uom_qty": 2.0,
-            "product_uom": product.uom_id.id,
+            move_uom_field(self.env): product.uom_id.id,
             "location_id": source.id,
             "location_dest_id": destination.id,
         }

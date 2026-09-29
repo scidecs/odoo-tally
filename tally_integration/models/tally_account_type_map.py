@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from odoo import api, fields, models
 from .constants import ACCOUNT_TYPE_SELECTION
+from .compat import sql_constraints
 
 
 class TallyAccountTypeMap(models.Model):
@@ -22,10 +23,11 @@ class TallyAccountTypeMap(models.Model):
         ACCOUNT_TYPE_SELECTION, string="Odoo Account Type", required=True)
     note = fields.Char()
 
-    _sql_constraints = [
+    sql_constraints(
+        locals(),
         ("tally_group_uniq", "UNIQUE(tally_group)",
          "A mapping for this Tally group already exists."),
-    ]
+    )
 
     @api.model
     def resolve(self, tally_group):

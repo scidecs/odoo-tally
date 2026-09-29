@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from odoo import _, fields, models
+from .compat import sql_constraints
 
 
 class TallyDiscoveredCompany(models.Model):
@@ -24,10 +25,11 @@ class TallyDiscoveredCompany(models.Model):
         default="new", index=True)
     last_seen = fields.Datetime(readonly=True)
 
-    _sql_constraints = [
+    sql_constraints(
+        locals(),
         ("name_uniq", "UNIQUE(reporter_instance_id, name)",
          "This Tally company is already listed for this reporting instance."),
-    ]
+    )
 
     def action_create_instance(self):
         """Create (or link) a tally.instance for this Tally company."""

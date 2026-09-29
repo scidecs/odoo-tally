@@ -54,7 +54,23 @@ class TestTallyAgentHttp(HttpCase):
             "/tally/agent/heartbeat", token=self.token)
         self.assertTrue(heartbeat["ok"])
         self.assertEqual(heartbeat["tally_company"], "Odoo 18 Test Company")
-        self.assertEqual(heartbeat["entities"][0]["entity"], "uom")
+        self.assertTrue(heartbeat["pull_due"])
+        self.assertIn("groups", heartbeat["structure_requests"])
+        self.assertEqual([step[0] for step in heartbeat["pull_plan"]], ["uom"])
+        self.assertIn("RemoteAltGUID", heartbeat["pull_plan"][0][1])
+
+        relayed = self._post("/tally/agent/push", {
+            "structure": {
+                "groups": "<ENVELOPE><GROUP NAME=\"Sundry Debtors\"><PARENT/></GROUP></ENVELOPE>",
+                "ledgers": "<ENVELOPE></ENVELOPE>",
+            },
+            "steps": [["uom", """<ENVELOPE><UNIT NAME="Relay Crates">
+                  <GUID>99999999-9999-9999-9999-999999999999</GUID>
+                  <ALTERID>12</ALTERID><DECIMALPLACES>0</DECIMALPLACES></UNIT></ENVELOPE>"""]],
+        }, token=self.token)
+        self.assertEqual(relayed["processed"], 1)
+        self.assertEqual(relayed["failed"], [])
+        self.assertTrue(self.instance.last_pull)
 
         discovered = self._post(
             "/tally/agent/companies",

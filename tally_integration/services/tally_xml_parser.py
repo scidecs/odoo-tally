@@ -95,8 +95,22 @@ def parse_currencies_from_xml(root):
             "decimal_places": dec_places,
             "guid": guid,
             "alterid": alterid,
+            "master_id": _clean_text(c, "MASTERID"),
+            "remote_alt_guid": _clean_text(c, "REMOTEALTGUID"),
         })
     return currencies
+
+
+def _identity(elem):
+    """Tally identity fields common to every exported object."""
+    return {
+        "guid": _clean_text(elem, "GUID"),
+        "alterid": _clean_text(elem, "ALTERID"),
+        "master_id": _clean_text(elem, "MASTERID"),
+        # Tally keeps the GUID supplied on import as REMOTEALTGUID. It is the
+        # stable echo marker for records that Odoo created.
+        "remote_alt_guid": _clean_text(elem, "REMOTEALTGUID"),
+    }
 
 
 def parse_groups_from_xml(root):
@@ -106,14 +120,33 @@ def parse_groups_from_xml(root):
         name = g.attrib.get("NAME") or _clean_text(g, "NAME")
         if not name:
             continue
-        groups.append({
+        groups.append(dict({
             "name": name,
-            "parent": _clean_text(g, "PARENT", "Primary"),
+            "parent": _clean_text(g, "PARENT", "Primary") or "Primary",
+            "reserved_name": g.attrib.get("RESERVEDNAME") or _clean_text(g, "RESERVEDNAME"),
             "nature": _clean_text(g, "NATUREOFGROUP", ""),
-            "guid": _clean_text(g, "GUID"),
-            "alterid": _clean_text(g, "ALTERID"),
-        })
+        }, **_identity(g)))
     return groups
+
+
+PARTY_ROOT_GROUPS = ("sundry debtors", "sundry creditors")
+TAX_ROOT_GROUPS = ("duties & taxes",)
+
+
+def build_group_tree(groups):
+    """Map lower-case group name -> lower-case parent name."""
+    return {(g.get("name") or "").lower(): (g.get("parent") or "Primary").lower() for g in groups or []}
+
+
+def group_chain(parent, group_tree):
+    """Return the group ancestry of a ledger, nearest first, e.g.
+    ``["debtors - north", "sundry debtors"]``. Cycles are cut defensively."""
+    chain = []
+    node = (parent or "").strip().lower()
+    while node and node != "primary" and node not in chain:
+        chain.append(node)
+        node = (group_tree or {}).get(node, "")
+    return chain
 
 
 def parse_ledgers_from_xml(root):
@@ -131,26 +164,36 @@ def parse_ledgers_from_xml(root):
             if addr.text and addr.text.strip():
                 addresses.append(addr.text.strip())
 
-        gstin = _clean_text(l, "PARTYGSTIN", "") or _clean_text(l, "GSTIN", "")
+        # TallyPrime keeps GST/address data either on the ledger itself (older
+        # releases) or in dated sub-lists (LEDGSTREGDETAILS / LEDMAILINGDETAILS).
+        gst_reg = l.find(".//LEDGSTREGDETAILS.LIST")
+        mailing = l.find(".//LEDMAILINGDETAILS.LIST")
+        if not addresses and mailing is not None:
+            addresses = [a.text.strip() for a in mailing.iter("ADDRESS") if a.text and a.text.strip()]
+        gstin = (_clean_text(l, "PARTYGSTIN", "") or _clean_text(l, "GSTIN", "")
+                 or _clean_text(gst_reg, "GSTIN", ""))
         pan = (_clean_text(l, "INCOMETAXNUMBER", "") or _clean_text(l, "PANNUMBER", "")
                or _clean_text(l, "PAN", ""))
 
-        ledgers.append({
+        ledgers.append(dict({
             "name": name,
+            "reserved_name": l.attrib.get("RESERVEDNAME") or "",
             "parent": parent,
-            "guid": _clean_text(l, "GUID"),
-            "alterid": _clean_text(l, "ALTERID"),
             "opening_balance": _clean_float(l, "OPENINGBALANCE", 0.0),
             "gstin": gstin,
             "pan": pan,
-            "state": _clean_text(l, "STATENAME", "") or _clean_text(l, "STATE", ""),
-            "country": _clean_text(l, "COUNTRYNAME", "India"),
-            "pincode": _clean_text(l, "PINCODE", ""),
+            "state": (_clean_text(l, "LEDSTATENAME", "") or _clean_text(l, "STATENAME", "")
+                      or _clean_text(l, "OLDLEDSTATENAME", "") or _clean_text(l, "STATE", "")
+                      or _clean_text(mailing, "STATE", "") or _clean_text(gst_reg, "STATE", "")),
+            "country": (_clean_text(l, "COUNTRYNAME", "") or _clean_text(l, "COUNTRYOFRESIDENCE", "")
+                        or _clean_text(mailing, "COUNTRY", "") or "India"),
+            "pincode": _clean_text(l, "PINCODE", "") or _clean_text(mailing, "PINCODE", ""),
             "email": _clean_text(l, "EMAIL", ""),
             "phone": _clean_text(l, "LEDGERPHONE", "") or _clean_text(l, "LEDGERMOBILE", ""),
             "credit_limit": _clean_float(l, "CREDITLIMIT", 0.0),
             "addresses": addresses,
-            "gst_registration_type": _clean_text(l, "GSTREGISTRATIONTYPE", ""),
+            "gst_registration_type": (_clean_text(l, "GSTREGISTRATIONTYPE", "")
+                                      or _clean_text(gst_reg, "GSTREGISTRATIONTYPE", "")),
             "tax_type": _clean_text(l, "TAXTYPE", ""),
             "gst_duty_head": _clean_text(l, "GSTDUTYHEAD", ""),
             "rate_of_tax": _clean_float(l, "RATEOFTAXCALCULATION", 0.0),
@@ -159,7 +202,7 @@ def parse_ledgers_from_xml(root):
             "is_tcs_applicable": _clean_text(l, "ISTCSAPPLICABLE", "No").lower() in ("yes", "true", "1"),
             "tds_section": _clean_text(l, "TDSSECTION", ""),
             "tcs_section": _clean_text(l, "TCSSECTION", ""),
-        })
+        }, **_identity(l)))
     return ledgers
 
 
@@ -177,6 +220,8 @@ def parse_units_from_xml(root):
             "uqc": _clean_text(u, "GSTREPUOM", ""),
             "guid": _clean_text(u, "GUID"),
             "alterid": _clean_text(u, "ALTERID"),
+            "master_id": _clean_text(u, "MASTERID"),
+            "remote_alt_guid": _clean_text(u, "REMOTEALTGUID"),
         })
     return units
 
@@ -192,19 +237,41 @@ def parse_stock_groups_from_xml(root):
                 "parent": _clean_text(group, "PARENT", "Primary"),
                 "guid": _clean_text(group, "GUID"),
                 "alterid": _clean_text(group, "ALTERID"),
+                "master_id": _clean_text(group, "MASTERID"),
+                "remote_alt_guid": _clean_text(group, "REMOTEALTGUID"),
             })
     return groups
 
 
-def filter_ledgers_for_entity(records, entity):
+def classify_ledger(record, group_tree=None):
+    """Return ``(is_party, is_tax, chain)`` for a parsed ledger.
+
+    With the company's group tree the ledger is classified by the reserved root
+    group it rolls up to, so parties kept under custom sub-groups (for example
+    "Debtors - North" under "Sundry Debtors") stay parties. Without a tree the
+    immediate parent name is the only evidence available.
+    """
+    parent = (record.get("parent") or "").strip().lower()
+    chain = group_chain(parent, group_tree) if group_tree else ([parent] if parent else [])
+    tax_type = (record.get("tax_type") or "").strip().lower()
+    is_tax = (any(g in TAX_ROOT_GROUPS for g in chain)
+              or bool(record.get("gst_duty_head"))
+              or tax_type in ("gst", "tds", "tcs", "vat", "cess", "excise", "service tax"))
+    if group_tree:
+        is_party = any(g in PARTY_ROOT_GROUPS for g in chain)
+    else:
+        is_party = any(k in parent for k in (
+            "sundry debt", "sundry credit", "debtor", "creditor", "customer", "vendor", "supplier"))
+        is_tax = is_tax or any(k in parent for k in ("duties", "taxes"))
+    return is_party and not is_tax, is_tax, chain
+
+
+def filter_ledgers_for_entity(records, entity, group_tree=None):
     """Split Tally's single Ledger collection into parties, taxes, and accounts."""
     result = []
     for record in records or []:
-        parent = (record.get("parent") or "").lower()
-        taxish = bool(record.get("tax_type") or record.get("gst_duty_head")
-                      or any(k in parent for k in ("duties", "tax", "tds", "tcs")))
-        party = any(k in parent for k in (
-            "sundry debt", "sundry credit", "customer", "vendor", "supplier"))
+        party, taxish, chain = classify_ledger(record, group_tree)
+        record["group_chain"] = chain
         if entity == "tax" and taxish:
             result.append(record)
         elif entity == "ledger" and party and not taxish:
@@ -285,6 +352,8 @@ def parse_stock_items_from_xml(root):
             "batch_allocations": batch_allocations,
             "guid": _clean_text(s, "GUID"),
             "alterid": _clean_text(s, "ALTERID"),
+            "master_id": _clean_text(s, "MASTERID"),
+            "remote_alt_guid": _clean_text(s, "REMOTEALTGUID"),
         })
     return items
 
@@ -303,6 +372,8 @@ def parse_cost_centres_from_xml(root):
             "category": _clean_text(c, "CATEGORYNAME", "Primary Cost Category"),
             "guid": _clean_text(c, "GUID"),
             "alterid": _clean_text(c, "ALTERID"),
+            "master_id": _clean_text(c, "MASTERID"),
+            "remote_alt_guid": _clean_text(c, "REMOTEALTGUID"),
         })
     return centres
 
@@ -319,6 +390,8 @@ def parse_godowns_from_xml(root):
             "parent": _clean_text(g, "PARENT", "Primary"),
             "guid": _clean_text(g, "GUID"),
             "alterid": _clean_text(g, "ALTERID"),
+            "master_id": _clean_text(g, "MASTERID"),
+            "remote_alt_guid": _clean_text(g, "REMOTEALTGUID"),
         })
     return godowns
 
@@ -334,10 +407,13 @@ def _parse_single_voucher_element(v):
     narration = _clean_text(v, "NARRATION")
     reference = _clean_text(v, "REFERENCE")
 
-    # Parse Ledger Entries
+    # Tally can return the same lines twice: ALLLEDGERENTRIES is the complete
+    # accounting view, while LEDGERENTRIES (invoice view) repeats the party and
+    # tax lines. Use exactly one list, preferring the complete one.
+    ledger_nodes = (v.findall("ALLLEDGERENTRIES.LIST")
+                    or v.findall("LEDGERENTRIES.LIST"))
     ledger_entries = []
-    for le in (v.findall(".//ALLLEDGERENTRIES.LIST") +
-               v.findall(".//LEDGERENTRIES.LIST")):
+    for le in ledger_nodes:
         led_name = _clean_text(le, "LEDGERNAME")
         if not led_name:
             continue
@@ -369,12 +445,15 @@ def _parse_single_voucher_element(v):
 
     # Parse Inventory Entries
     inventory_entries = []
-    inventory_nodes = [(ie, None) for ie in v.findall(".//ALLINVENTORYENTRIES.LIST")]
     # Tally's Stock Journal export uses IN for source/consumption and OUT for
-    # destination/production. Quantities are unsigned, so preserve direction
-    # explicitly for the Odoo internal-transfer importer.
-    inventory_nodes += [(ie, -1) for ie in v.findall(".//INVENTORYENTRIESIN.LIST")]
-    inventory_nodes += [(ie, 1) for ie in v.findall(".//INVENTORYENTRIESOUT.LIST")]
+    # destination/production, and may repeat the same lines in
+    # ALLINVENTORYENTRIES. The IN/OUT lists carry the direction explicitly, so
+    # prefer them and never combine both representations.
+    inventory_nodes = ([(ie, -1) for ie in v.findall("INVENTORYENTRIESIN.LIST")]
+                       + [(ie, 1) for ie in v.findall("INVENTORYENTRIESOUT.LIST")])
+    if not inventory_nodes:
+        inventory_nodes = [(ie, None) for ie in (v.findall("ALLINVENTORYENTRIES.LIST")
+                                                 or v.findall("INVENTORYENTRIES.LIST"))]
     for ie, direction in inventory_nodes:
         item_name = _clean_text(ie, "STOCKITEMNAME")
         if not item_name:
@@ -401,7 +480,9 @@ def _parse_single_voucher_element(v):
         # Godown
         godown = _clean_text(ie.find(".//BATCHALLOCATIONS.LIST"), "GODOWNNAME", "Main Location") if ie.find(".//BATCHALLOCATIONS.LIST") is not None else "Main Location"
 
+        acc_alloc = ie.find("ACCOUNTINGALLOCATIONS.LIST")
         inventory_entries.append({
+            "account_ledger": _clean_text(acc_alloc, "LEDGERNAME") if acc_alloc is not None else "",
             "item": item_name,
             "qty": qty,
             "rate": rate,
@@ -450,6 +531,9 @@ def _parse_single_voucher_element(v):
         "date": date,
         "guid": guid,
         "alterid": alterid,
+        "master_id": _clean_text(v, "MASTERID"),
+        "remote_alt_guid": _clean_text(v, "REMOTEALTGUID"),
+        "is_invoice": _clean_text(v, "ISINVOICE").lower() in ("yes", "1", "true"),
         "party_ledger": party,
         "reference": reference,
         "narration": narration,

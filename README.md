@@ -1,10 +1,10 @@
 # Scidecs Odoo–TallyPrime Integration
 
-[![Odoo 18](https://img.shields.io/badge/Odoo-18.0-875A7B.svg)](https://www.odoo.com/)
+[![Odoo 18 | 19 | 20](https://img.shields.io/badge/Odoo-18.0%20%7C%2019.0%20%7C%2020.0-875A7B.svg)](https://www.odoo.com/)
 [![License LGPL-3](https://img.shields.io/badge/License-LGPL--3-blue.svg)](LICENSE)
 [![Free](https://img.shields.io/badge/Module-Free-16A34A.svg)](#free-software-paid-expertise)
 
-A free, open-source Odoo 18 connector that keeps supported accounting and inventory data aligned
+A free, open-source connector for Odoo 18, 19 and 20 that keeps supported accounting and inventory data aligned
 between Odoo and TallyPrime. It supports direct XML/HTTP connectivity and an outbound-only agent
 for private networks, with durable queues, stable identities, per-entity ownership rules,
 monitoring, and poison-record quarantine.
@@ -12,8 +12,10 @@ monitoring, and poison-record quarantine.
 The code is free under LGPL-3. Scidecs charges only when an organization chooses professional
 discovery, configuration, migration, training, support, or customization.
 
-> Release position: live-Tally round trip validated and ready for controlled customer UAT.
-> Customer-specific UAT remains mandatory before unattended production operation.
+> Release position (1.2.0): live integrity matrix passed on Odoo 18, 19 and 20 against TallyPrime —
+> every Tally ledger balance equal to Odoo after two-way edits, cancellations, renames, onboarding
+> and multi-company runs. Customer-specific UAT with `scripts/integrity/` remains mandatory before
+> unattended production operation.
 
 ## Why this exists — AIDA summary
 
@@ -37,7 +39,7 @@ documented rather than hidden behind a generic “complete integration” claim.
 
 ### Action
 
-Install the module in a test Odoo 18 database, connect a backed-up Tally test company, run the
+Install the module in a test Odoo 18, 19 or 20 database, connect a backed-up Tally test company, run the
 [deployment checklist](Docs/INSTALLATION_AND_OPERATIONS.md), and complete the
 [UAT matrix](Docs/TESTING_AND_VALIDATION.md) before production activation.
 
@@ -121,7 +123,7 @@ allow-listed private network, authenticated tunnel, or HTTPS reverse proxy.
 ## Quick start
 
 1. Back up the Odoo database and Tally company.
-2. Put `tally_integration` on the Odoo 18 addons path.
+2. Put `tally_integration` from the branch matching your Odoo version (`18.0`, `19.0`, `20.0`) on the addons path.
 3. Update the Apps list and install **Tally Prime Integration**.
 4. In TallyPrime, enable the XML server and open the target company.
 5. Create one Tally instance in Odoo and select direct or agent mode.
@@ -135,8 +137,11 @@ in [Installation and Operations](Docs/INSTALLATION_AND_OPERATIONS.md).
 
 ## Reliability controls
 
-- RFC-4122-compatible stable GUIDs and dedicated identity mappings.
-- SHA-256 content hashes and origin tracking for echo suppression.
+- Two-sided identity map: the GUID Odoo sends (Tally's REMOTEALTGUID) and Tally's own GUID,
+  MasterID, AlterID, name and voucher number, bound immediately after every push.
+- Revision-based echo suppression (AlterID), accounting fingerprints and field gating so records
+  are only written back on real edits.
+- Type-safe voucher addressing (REMOTEID; verified unique date + number for Tally-typed vouchers).
 - Per-entity direction, source-of-truth policy, and AlterID watermark.
 - Durable outbound queue with idempotency keys, retry, acknowledgement, and expired-lease recovery.
 - Inbound dead-letter records with payload hash, error history, threshold, quarantine, and targeted
@@ -149,20 +154,18 @@ in [Installation and Operations](Docs/INSTALLATION_AND_OPERATIONS.md).
 
 ## Validation status
 
-The release was validated using:
+Release 1.2.0 passes, on each of Odoo 18, 19 and 20:
 
-- Python compilation and XML/manifest checks.
-- Eight standalone XML transformation tests.
-- Fresh Odoo 18 module installation.
-- Twenty-three post-install test methods / 27 Odoo framework counts with zero failures and zero errors.
-- A real TallyPrime round trip covering 15 products, purchases, sales, both returns, CGST/SGST,
-  receipts, payments, a journal, and an internal Stock Journal transfer.
-- Fresh-database recovery, repeated-pull idempotency, and price edits in both directions.
-- A privacy-reviewed 1080p live walkthrough showing an Odoo product creation, split-screen handoff,
-  TallyPrime stock-item arrival, and matching part-number verification.
+- Python compilation, XML/manifest checks and cross-version guards.
+- 8 standalone XML transformation tests and 48 Odoo post-install tests with zero failures.
+- A live integrity matrix against TallyPrime (12 runs, 45 audit steps, 0 issues): both systems new
+  with edits, cancellations and renames on both sides; Tally in use with Odoo new; Odoo in use with
+  Tally new; two Odoo companies with two Tally companies. Every audit compares every Tally ledger
+  closing balance with Odoo and repeats a sync cycle that must change nothing.
+- The on-premise agent end to end, and the upgrade migration from 19.0.1.1.0.
 
-Read [Testing and Validation](Docs/TESTING_AND_VALIDATION.md) and the
-[release evidence summary](tally_integration/FINAL_VALIDATION_REPORT.md).
+Read [Implementation Status](Docs/IMPLEMENTATION_STATUS.md),
+[Sync Integrity Rules](Docs/SYNC_INTEGRITY_RULES.md) and [Testing and Validation](Docs/TESTING_AND_VALIDATION.md).
 
 ## How this differs from common alternatives
 
@@ -210,13 +213,15 @@ different hidden edition of the connector. See [Support and Consulting](Docs/SUP
 | [Odoo Apps Publishing](Docs/ODOO_APPS_PUBLISHING.md) | Release manager | Store assets, manifest, branch and submission checklist |
 | [Odoo Apps Growth Roadmap](Docs/ODOO_APPS_GROWTH_ROADMAP.md) | Product, design, marketing | Listing benchmark, visual redesign, compliant authority and measurement plan |
 | [Implementation Status](Docs/IMPLEMENTATION_STATUS.md) | All reviewers | Honest supported boundary and release gates |
+| [Sync Integrity Rules](Docs/SYNC_INTEGRITY_RULES.md) | Implementers, support, developers | Verified TallyPrime behaviours and the identity, echo and posting rules built on them |
+| [Integrity harness](scripts/integrity/README.md) | QA, customer UAT | Live scenario runner that audits every ledger balance in both systems |
 | [Roadmap](Docs/ROADMAP.md) | Product and engineering | Completed capabilities and future hardening |
 | [Changelog](CHANGELOG.md) | All users | Versioned public feature and correction history |
 | [Contributing](CONTRIBUTING.md) | Contributors | Change design, validation, documentation and security reporting |
 
 ## Compatibility and license
 
-- Odoo: 18.0 Community and Enterprise code paths.
+- Odoo: 18.0, 19.0 and 20.0 Community and Enterprise (branches `18.0`, `19.0`, `20.0`). Odoo 20 needs PostgreSQL 16+.
 - Hosting: Odoo.sh or on-premise; direct connectivity depends on network reachability.
 - Tally: TallyPrime native XML gateway; validate the customer's exact release and configuration.
 - Python agent: Python 3.10+ standard library only.
