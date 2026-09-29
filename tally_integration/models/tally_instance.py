@@ -8,6 +8,7 @@ from odoo.exceptions import UserError, ValidationError
 _logger = logging.getLogger(__name__)
 
 from .constants import DEFAULT_ENTITIES, direction_for_source
+from .compat import config_param, sql_constraints
 
 
 class TallyInstance(models.Model):
@@ -84,6 +85,14 @@ class TallyInstance(models.Model):
         help="How often the scheduled job pulls FROM Tally (decoupled from the faster push "
              "cadence). A full pull is heavier than a push, so this is less frequent.")
     last_pull = fields.Datetime(string="Last Pull", readonly=True)
+    tally_books_from = fields.Date(string="Tally Books From", readonly=True)
+    tally_ledger_index = fields.Text(
+        readonly=True, copy=False,
+        help="Ledger name -> party/tax/group-chain classification read from Tally.")
+    tally_group_tree = fields.Text(readonly=True, copy=False)
+    tally_voucher_type_parents = fields.Text(
+        readonly=True, copy=False,
+        help="User-defined Tally voucher type -> parent type, used to route custom types.")
     use_tdl_delta = fields.Boolean(
         string="Server-side AlterID Delta (TDL)", default=False,
         help="Send an inline TDL filter so Tally returns only masters changed since the last "
@@ -175,13 +184,14 @@ class TallyInstance(models.Model):
     quarantine_count = fields.Integer(compute="_compute_counts")
     synced_today = fields.Integer(string="Synced Today", compute="_compute_counts")
 
-    _sql_constraints = [
+    sql_constraints(
+        locals(),
         ("name_company_uniq", "UNIQUE(name, company_id)",
          "Instance name must be unique per company."),
         ("positive_quarantine_threshold",
          "CHECK(inbound_quarantine_threshold >= 1)",
          "Inbound quarantine attempts must be at least 1."),
-    ]
+    )
 
     @api.constrains("active", "company_id")
     def _check_single_active_instance_per_company(self):
@@ -459,12 +469,139 @@ class TallyInstance(models.Model):
             record_name=name, odoo_model_name=item.odoo_model_name,
             odoo_res_id=item.odoo_res_id, detail=error, record_count=1)
 
-    def _direct_dispatch_queue(self, limit=100, batch_size=25):
-        """POST pending/failed outbound (Odoo -> Tally) queue items straight to Tally.
+    # Masters must exist in Tally before any voucher that references them.
+    MASTER_PUSH_ORDER = ["currency", "group", "uom", "stock_group", "godown", "cost_centre",
+                         "tax", "account_ledger", "ledger", "stock_item"]
+    COLLECTION_FOR_ENTITY = {
+        "currency": "Currency", "group": "Group", "uom": "Unit", "stock_group": "StockGroup",
+        "godown": "Godown", "cost_centre": "CostCentre", "tax": "Ledger",
+        "account_ledger": "Ledger", "ledger": "Ledger", "stock_item": "StockItem",
+    }
 
-        High throughput batching: Bundles up to `batch_size` TALLYMESSAGE items inside
-        a single XML envelope. If the batch succeeds, all items are acknowledged together.
-        If a batch fails, it falls back to item-by-item dispatch to isolate individual errors.
+    def _tally_post(self, xml, timeout=30):
+        from ..services import tally_transport
+        ep = self._tally_endpoint()
+        return tally_transport.post_xml(ep["url"], xml, auth=ep["auth"], extra_headers=ep["headers"],
+                                        verify=ep["verify"], timeout=timeout)
+
+    def _tally_export(self, xml, timeout=60):
+        from ..services import tally_xml_parser
+        return tally_xml_parser.parse_tally_xml_root(self._tally_post(xml, timeout=timeout))
+
+    @staticmethod
+    def _payload_remote_ids(payload):
+        import re
+        return re.findall(r"<GUID>(.*?)</GUID>", payload or "")
+
+    def _identity_pairs(self, items):
+        """Group queue items by Tally collection with their identity mappings."""
+        Mapping = self.env["tally.mapping"]
+        by_collection = {}
+        for item in items:
+            if not (item.odoo_model_name and item.odoo_res_id):
+                continue
+            mapping = Mapping.for_record(self, item.entity, item.odoo_model_name, item.odoo_res_id)
+            if not mapping:
+                continue
+            coll = "Voucher" if "<VOUCHER" in (item.payload or "") else self.COLLECTION_FOR_ENTITY.get(item.entity)
+            if coll:
+                by_collection.setdefault(coll, []).append((item, mapping))
+        return by_collection
+
+    def _identity_request(self, coll, pairs, last_vch_id=None):
+        """Export request that returns Tally's identity for pushed records."""
+        from ..services import tally_xml_builder
+        remote_ids = [m.remote_id for _i, m in pairs if m.remote_id]
+        master_ids = [m.tally_masterid for _i, m in pairs if m.tally_masterid]
+        if coll == "Voucher" and last_vch_id and len(pairs) == 1:
+            master_ids.append(last_vch_id)
+        if not (remote_ids or master_ids):
+            return None
+        return tally_xml_builder.build_identity_lookup(
+            coll, remote_alt_guids=remote_ids, master_ids=master_ids, company_name=self.tally_company)
+
+    def _apply_identity_response(self, coll, pairs, raw, last_vch_id=None):
+        from ..services import tally_xml_parser
+        root = tally_xml_parser.parse_tally_xml_root(raw)
+        if root is None:
+            return
+        if coll == "Voucher":
+            found = tally_xml_parser.parse_vouchers_from_xml(root)
+        else:
+            found = []
+            for el in root.iter(coll.upper()):
+                guid = (el.findtext("GUID") or "").strip()
+                if guid:
+                    found.append({
+                        "name": el.get("NAME") or (el.findtext("NAME") or "").strip(),
+                        "guid": guid,
+                        "alterid": (el.findtext("ALTERID") or "").strip(),
+                        "master_id": (el.findtext("MASTERID") or "").strip(),
+                        "remote_alt_guid": (el.findtext("REMOTEALTGUID") or "").strip(),
+                    })
+        for _item, mapping in pairs:
+            candidates = [f for f in found if mapping.remote_id and f.get("remote_alt_guid") == mapping.remote_id]
+            if len(candidates) > 1 and mapping.tally_name:
+                candidates = [f for f in candidates if f.get("name") == mapping.tally_name] or candidates
+            if not candidates and mapping.tally_masterid:
+                candidates = [f for f in found if f.get("master_id") == mapping.tally_masterid]
+            if not candidates and coll == "Voucher" and last_vch_id and len(pairs) == 1:
+                candidates = [f for f in found if f.get("master_id") == str(last_vch_id)]
+            if candidates:
+                mapping.bind_identity(candidates[0])
+
+    def _bind_identities(self, items, result=None):
+        """After Tally accepted ``items``, read back Tally's own identity (GUID,
+        MasterID, AlterID, voucher number) and store it on the identity map, so
+        the next pull recognises these objects instead of importing them again."""
+        last_vch_id = (result or {}).get("last_vch_id")
+        for coll, pairs in self._identity_pairs(items).items():
+            xml = self._identity_request(coll, pairs, last_vch_id)
+            if not xml:
+                continue
+            try:
+                raw = self._tally_post(xml)
+            except Exception as e:
+                _logger.warning("Identity read-back failed for %s on instance %s: %s", coll, self.id, e)
+                continue
+            self._apply_identity_response(coll, pairs, raw, last_vch_id)
+
+    def _voucher_address_check(self, item):
+        """For a payload addressing a Tally-typed voucher by date + number, return
+        ``(verify_request_xml, expected_guid)``; ``(None, None)`` otherwise.
+
+        Tally matches date + number across voucher types, so an Alter/Cancel is
+        only safe when exactly one voucher in Tally has that pair and it is the
+        linked one.
+        """
+        import datetime
+        import re
+        from ..services import tally_xml_builder
+        payload = item.payload or ""
+        m = re.search(r'<VOUCHER DATE="([^"]+)" TAGNAME="Voucher Number" TAGVALUE="([^"]*)"', payload)
+        if not m:
+            return None, None
+        mapping = self.env["tally.mapping"].for_record(self, item.entity, item.odoo_model_name, item.odoo_res_id)
+        day = datetime.datetime.strptime(m.group(1), "%d-%b-%Y").date()
+        number = m.group(2).replace("&amp;", "&").replace("&quot;", '"')
+        xml = tally_xml_builder.build_voucher_collection_export(
+            company_name=self.tally_company, from_date=day, to_date=day,
+            formula="$VoucherNumber = %s" % tally_xml_builder.tdl_string(number),
+            fetch_fields="GUID,VoucherNumber,VoucherTypeName")
+        return xml, mapping.tally_guid
+
+    @staticmethod
+    def _voucher_address_ok(raw, expected_guid):
+        import re
+        guids = re.findall(r"<GUID[^>]*>([^<]+)</GUID>", raw or "")
+        return bool(expected_guid) and guids == [expected_guid]
+
+    def _direct_dispatch_queue(self, limit=200, batch_size=25):
+        """Push pending outbound (Odoo -> Tally) queue items straight to Tally.
+
+        Masters go first (batched), then vouchers one per request so each result
+        can be tied to exactly one Tally voucher. Every accepted item is bound to
+        Tally's identity immediately after the import.
         """
         self.ensure_one()
         self._guard_environment()
@@ -478,116 +615,113 @@ class TallyInstance(models.Model):
             ("instance_id", "=", self.id),
             "|", ("state", "=", "pending"),
             "&", ("state", "=", "failed"), ("attempts", "<", self.MAX_QUEUE_ATTEMPTS),
-        ], order="create_date", limit=limit)
+        ], order="create_date, id", limit=limit)
         if not items:
             return True
-
-        ep = self._tally_endpoint()
         contacted = None
 
-        def _extract_messages(xml_text):
+        def _messages(xml_text):
             return re.findall(r"(<TALLYMESSAGE[\s\S]*?</TALLYMESSAGE>)", xml_text or "")
 
-        def _detect_report_type(xml_text):
-            if "<VOUCHER" in (xml_text or ""):
-                return "Vouchers"
-            m = re.search(r"<ID>(.*?)</ID>", xml_text or "")
-            return m.group(1) if m else "All Masters"
+        def _fail(item, error):
+            if tally_transport.is_educational_date_error(error):
+                error = _("%s — TallyPrime Educational only accepts the 1st, 2nd and 31st of a month; "
+                          "enable 'Tally Educational Mode' on the instance for test companies.") % error
+            item.write({"state": "failed", "attempts": item.attempts + 1, "error": error})
+            self._log_outbound(item, False, error=error)
 
-        def _dispatch_single_item(item):
-            nonlocal contacted
+        def _ok(batch, result):
+            for it in batch:
+                it.write({"state": "acked", "attempts": it.attempts + 1, "error": False})
+                self._log_outbound(it, True)
             try:
-                payload = item.payload or ""
-                if "<VOUCHER" in payload and "<ID>All Masters</ID>" in payload:
-                    payload = payload.replace("<ID>All Masters</ID>", "<ID>Vouchers</ID>")
-                resp = tally_transport.post_xml(
-                    ep["url"], payload, auth=ep["auth"],
-                    extra_headers=ep["headers"], verify=ep["verify"])
-                contacted = True
-                result = tally_transport.parse_import_response(resp)
-                changed = (result.get("created", 0) + result.get("altered", 0) +
-                           result.get("deleted", 0) + result.get("combined", 0) +
-                           result.get("ignored", 0))
-                if result.get("errors") or (not changed and result.get("line_error")):
-                    item.write({"state": "failed", "attempts": item.attempts + 1,
-                                "error": result.get("line_error") or
-                                         _("Ambiguous Tally response: no object count returned")})
-                    self._log_outbound(
-                        item, False, error=result.get("line_error") or
-                        _("Ambiguous Tally response: no object count returned"))
-                else:
-                    item.write({"state": "acked", "attempts": item.attempts + 1, "error": False})
-                    self._log_outbound(item, True)
+                self._bind_identities(batch, result)
+            except Exception as e:
+                _logger.warning("Identity binding failed on instance %s: %s", self.id, e)
+
+        def _post(payload):
+            nonlocal contacted
+            resp = self._tally_post(payload)
+            contacted = True
+            return tally_transport.parse_import_response(resp)
+
+        def _single(item):
+            payload = item.payload or ""
+            if "<VOUCHER" in payload and "<ID>All Masters</ID>" in payload:
+                payload = payload.replace("<ID>All Masters</ID>", "<ID>Vouchers</ID>")
+            verify_xml, expected = self._voucher_address_check(item)
+            if verify_xml:
+                try:
+                    ok = self._voucher_address_ok(self._tally_post(verify_xml), expected)
+                except TallyTransportError:
+                    raise
+                if not ok:
+                    _fail(item, _("Tally has more than one voucher with this date and number (voucher "
+                                  "numbers repeat across voucher types), or the linked voucher is gone. "
+                                  "Sending would change the wrong voucher, so this edit must be made "
+                                  "in Tally."))
+                    return
+            try:
+                result = _post(payload)
             except TallyTransportError as e:
-                contacted = False
                 item.write({"state": "failed", "attempts": item.attempts + 1, "error": str(e)})
                 raise
             except Exception as e:
-                item.write({"state": "failed", "attempts": item.attempts + 1, "error": str(e)})
-                self._log_outbound(item, False, error=str(e))
+                _fail(item, str(e))
+                return
+            changed = sum(result.get(k, 0) for k in ("created", "altered", "deleted", "combined", "ignored"))
+            if result.get("errors") or result.get("line_error") or not changed:
+                _fail(item, result.get("line_error") or _("Ambiguous Tally response: no object count returned"))
+            else:
+                _ok(item, result)
 
-        # Group items by report_type for batch packaging
-        by_report_type = {}
-        for item in items:
-            rtype = _detect_report_type(item.payload)
-            by_report_type.setdefault(rtype, []).append(item)
+        masters = items.filtered(lambda i: "<VOUCHER" not in (i.payload or ""))
+        order = {e: n for n, e in enumerate(self.MASTER_PUSH_ORDER)}
+        masters = masters.sorted(lambda i: (order.get(i.entity, 99), i.create_date or fields.Datetime.now(), i.id))
+        vouchers = items - masters
 
-        for rtype, ritems in by_report_type.items():
-            # Chunk items into batches
-            for i in range(0, len(ritems), batch_size):
-                batch = ritems[i:i + batch_size]
-                if len(batch) == 1:
-                    try:
-                        _dispatch_single_item(batch[0])
-                    except TallyTransportError:
-                        break
+        def _master_key(item):
+            m = re.search(r'<(\w+) NAME="([^"]*)"', item.payload or "")
+            return (m.group(1), m.group(2).strip().lower()) if m else (item.entity, str(item.id))
+
+        # Tally aborts with an internal error (and stops serving XML until the
+        # dialog is closed) when one import creates the same master twice, so a
+        # batch never carries two messages for the same Tally name.
+        batches, current, seen = [], [], set()
+        for item in masters:
+            key = _master_key(item)
+            if key in seen or len(current) >= batch_size:
+                batches.append(current)
+                current, seen = [], set()
+            current.append(item)
+            seen.add(key)
+        if current:
+            batches.append(current)
+        try:
+            for batch in batches:
+                batch = self.env["tally.sync.queue"].browse([b.id for b in batch])
+                messages = [m for it in batch for m in _messages(it.payload)]
+                if len(batch) == 1 or not messages:
+                    for it in batch:
+                        _single(it)
                     continue
-
-                # Batch dispatch (multi-message envelope)
                 try:
-                    all_messages = []
-                    for item in batch:
-                        all_messages.extend(_extract_messages(item.payload))
-
-                    if not all_messages:
-                        for it in batch:
-                            _dispatch_single_item(it)
-                        continue
-
-                    batched_xml = tally_xml_builder.wrap_import_envelope(
-                        all_messages, company_name=self.tally_company, report_type=rtype)
-
-                    resp = tally_transport.post_xml(
-                        ep["url"], batched_xml, auth=ep["auth"],
-                        extra_headers=ep["headers"], verify=ep["verify"])
-                    contacted = True
-                    result = tally_transport.parse_import_response(resp)
-
-                    changed = (result.get("created", 0) + result.get("altered", 0) +
-                               result.get("deleted", 0) + result.get("combined", 0) +
-                               result.get("ignored", 0))
-                    if result.get("errors", 0) == 0 and changed >= len(batch):
-                        # Whole batch succeeded!
-                        for it in batch:
-                            it.write({"state": "acked", "attempts": it.attempts + 1, "error": False})
-                            self._log_outbound(it, True)
-                    else:
-                        # Fallback to single item dispatch to isolate which one had errors
-                        for it in batch:
-                            _dispatch_single_item(it)
-                except TallyTransportError as e:
-                    contacted = False
+                    result = _post(tally_xml_builder.wrap_import_envelope(
+                        messages, company_name=self.tally_company, report_type="All Masters"))
+                except TallyTransportError:
+                    raise
+                except Exception:
+                    result = {"errors": 1}
+                changed = sum(result.get(k, 0) for k in ("created", "altered", "combined", "ignored"))
+                if not result.get("errors") and not result.get("line_error") and changed >= len(messages):
+                    _ok(batch, result)
+                else:
                     for it in batch:
-                        it.write({"state": "failed", "attempts": it.attempts + 1, "error": str(e)})
-                    break
-                except Exception as e:
-                    # Fallback on unexpected error
-                    for it in batch:
-                        try:
-                            _dispatch_single_item(it)
-                        except Exception:
-                            pass
-
+                        _single(it)
+            for item in vouchers:
+                _single(item)
+        except TallyTransportError:
+            contacted = False
         if contacted is not None:
             self._set_status(contacted)
         return True
@@ -595,99 +729,264 @@ class TallyInstance(models.Model):
     def _direct_ping(self):
         """Cheap liveness probe so the dashboard shows true online/offline in direct mode."""
         self.ensure_one()
-        from ..services import tally_transport, tally_xml_builder
+        from ..services import tally_xml_builder
         try:
-            ep = self._tally_endpoint()
-            tally_transport.post_xml(
-                ep["url"],
-                tally_xml_builder.build_collection_export("Company", company_name=self.tally_company),
-                auth=ep["auth"], extra_headers=ep["headers"], verify=ep["verify"], timeout=8)
+            self._tally_post(tally_xml_builder.build_collection_export(
+                "Company", company_name=self.tally_company), timeout=8)
             self._set_status(True)
             return True
         except Exception:
             self._set_status(False)
             return False
 
-    def _direct_pull(self, include_vouchers=True):
-        """Pull masters (and optionally Day Book vouchers) from Tally directly — no agent.
+    # ------------------------------------------------------- Tally structure
+    def _get_ledger_index(self):
+        import json
+        try:
+            return json.loads(self.tally_ledger_index or "{}")
+        except ValueError:
+            return {}
 
-        Idempotent: re-pulling updates existing records via the identity map and is
-        echo-suppressed, so a scheduled full pull is safe.
+    def _get_voucher_type_parents(self):
+        import json
+        try:
+            return json.loads(self.tally_voucher_type_parents or "{}")
+        except ValueError:
+            return {}
+
+    def _opening_balance_date(self):
+        """Opening balances belong on the first day of the Tally books."""
+        return (self.tally_books_from or self.history_from
+                or fields.Date.context_today(self))
+
+    STRUCTURE_REQUESTS = ("groups", "ledgers", "voucher_types", "company")
+
+    def _structure_requests(self):
+        """Export requests needed to understand the Tally company's structure
+        (also sent to the on-prem agent, which relays the raw responses)."""
+        from ..services import tally_xml_builder
+        company = self.tally_company
+        return {
+            "groups": tally_xml_builder.build_collection_export("Group", company_name=company),
+            "ledgers": tally_xml_builder.build_collection_export("Ledger", company_name=company),
+            "voucher_types": tally_xml_builder.build_collection_export(
+                "VoucherType", company_name=company, fetch_fields="Name,Parent,GUID"),
+            "company": tally_xml_builder.build_collection_export(
+                "Company", company_name=company, fetch_fields="Name,BooksFrom,StartingFrom",
+                formula=("$Name = %s" % tally_xml_builder.tdl_string(company)) if company else None),
+        }
+
+    def _apply_tally_structure(self, responses):
+        """Store the ledger classification index, voucher-type hierarchy and
+        books-from date. ``responses`` maps request key -> raw Tally XML.
+        Returns ``(groups, ledgers, group_tree)``."""
+        import json
+        from ..services import tally_xml_parser
+        parse = tally_xml_parser.parse_tally_xml_root
+        groups = tally_xml_parser.parse_groups_from_xml(parse(responses["groups"]))
+        tree = tally_xml_parser.build_group_tree(groups)
+        ledgers = tally_xml_parser.parse_ledgers_from_xml(parse(responses["ledgers"]))
+        index = {}
+        for led in ledgers:
+            party, tax, chain = tally_xml_parser.classify_ledger(led, tree)
+            led["group_chain"] = chain
+            index[led["name"].strip().lower()] = {
+                "party": party, "tax": tax, "chain": chain, "parent": led.get("parent") or "",
+                "reserved": led.get("reserved_name") or ""}
+        parents = {}
+        if responses.get("voucher_types"):
+            for vt in parse(responses["voucher_types"]).iter("VOUCHERTYPE"):
+                name = (vt.get("NAME") or vt.findtext("NAME") or "").strip().lower()
+                parent = (vt.findtext("PARENT") or "").strip().lower()
+                if name and parent and parent != name:
+                    parents[name] = parent
+        vals = {"tally_ledger_index": json.dumps(index), "tally_voucher_type_parents": json.dumps(parents),
+                "tally_group_tree": json.dumps(tree)}
+        if responses.get("company"):
+            for c in parse(responses["company"]).iter("COMPANY"):
+                raw = (c.findtext("BOOKSFROM") or c.findtext("STARTINGFROM") or "").strip()
+                parsed = tally_xml_parser._parse_tally_date(raw)
+                if parsed and len(parsed) == 10:
+                    vals["tally_books_from"] = parsed
+                break
+        self.write(vals)
+        return groups, ledgers, tree
+
+    def _refresh_tally_structure(self):
+        """Direct mode: read the company structure from Tally and apply it."""
+        responses = {}
+        for key, xml in self._structure_requests().items():
+            try:
+                responses[key] = self._tally_post(xml, timeout=120)
+            except Exception as e:
+                if key in ("groups", "ledgers"):
+                    raise
+                _logger.info("Optional Tally structure request %s failed: %s", key, e)
+        return self._apply_tally_structure(responses)
+
+    PULL_ORDER = ["currency", "group", "uom", "stock_group", "godown", "cost_centre",
+                  "tax", "account_ledger", "ledger", "stock_item", "opening_balance"]
+    LEDGER_ENTITIES = ("ledger", "account_ledger", "tax", "opening_balance")
+    PULL_VOUCHER_ENTITIES = ("sales", "credit_note", "purchase", "debit_note",
+                             "receipt", "payment", "journal", "contra", "stock_journal")
+
+    def _pull_plan(self, include_vouchers=True):
+        """Ordered ``[(key, export_xml_or_None)]`` for one pull.
+
+        Group and ledger entities reuse the structure export (``None``); other
+        masters need their own collection; vouchers come last from a Voucher
+        collection filtered by AlterID (or by date on the first sync).
         """
-        self.ensure_one()
-        self._guard_environment()
-        if not self.active:
-            raise UserError(_("Synchronization is disabled because this database appears to be a copy."))
         from datetime import date, timedelta
-        from ..services import tally_transport, tally_xml_builder, tally_xml_parser
-        from ..services.sync_engine import SyncEngine
+        from ..services import tally_xml_builder
+        company = self.tally_company
+        enabled = {c.entity: c for c in self.entity_config_ids
+                   if c.enabled and c.direction in ("tally_to_odoo", "both")}
+        plan = []
+        for entity in self.PULL_ORDER:
+            cfg = enabled.get(entity)
+            if not cfg:
+                continue
+            if entity == "group" or entity in self.LEDGER_ENTITIES:
+                plan.append((entity, None))
+            else:
+                from_aid = cfg.last_alterid if self.use_tdl_delta else None
+                plan.append((entity, tally_xml_builder.build_collection_export(
+                    tally_xml_builder.COLLECTION_MAP[entity], company_name=company,
+                    from_alterid=from_aid)))
+        if include_vouchers and self.odoo_role != "operational":
+            enabled_v = [c for e, c in enabled.items() if e in self.PULL_VOUCHER_ENTITIES]
+            if enabled_v:
+                watermark = min(c.last_alterid or 0 for c in enabled_v)
+                if watermark:
+                    xml = tally_xml_builder.build_voucher_collection_export(
+                        company_name=company, from_alterid=watermark)
+                else:
+                    start = self.history_from or (date.today() - timedelta(days=self.pull_lookback_days or 30))
+                    xml = tally_xml_builder.build_voucher_collection_export(
+                        company_name=company, from_date=start)
+                plan.append(("vouchers", xml))
+        return plan
+
+    def _process_pull_step(self, engine, key, raw, groups, ledgers, tree):
+        """Parse one export response and feed it to the sync engine."""
+        from ..services import tally_xml_parser
         parser_map = {
             "currency": tally_xml_parser.parse_currencies_from_xml,
-            "group": tally_xml_parser.parse_groups_from_xml,
-            "account_ledger": tally_xml_parser.parse_ledgers_from_xml,
-            "ledger": tally_xml_parser.parse_ledgers_from_xml,
             "uom": tally_xml_parser.parse_units_from_xml,
             "stock_group": tally_xml_parser.parse_stock_groups_from_xml,
             "stock_item": tally_xml_parser.parse_stock_items_from_xml,
             "cost_centre": tally_xml_parser.parse_cost_centres_from_xml,
             "godown": tally_xml_parser.parse_godowns_from_xml,
-            "tax": tally_xml_parser.parse_ledgers_from_xml,
-            "opening_balance": tally_xml_parser.parse_ledgers_from_xml,
         }
-        engine = SyncEngine(self.env, self)
-        ep = self._tally_endpoint()
-        pulled = 0
+        if key == "vouchers":
+            vouchers = tally_xml_parser.parse_vouchers_from_xml(
+                tally_xml_parser.parse_tally_xml_root(raw))
+            # Oldest revision first so Tally's own order of edits is replayed.
+            vouchers.sort(key=lambda v: int(v.get("alterid") or 0))
+            res = engine.process_vouchers(vouchers) if vouchers else {}
+            return sum((r or {}).get("processed", 0) for r in res.values())
+        if key == "group":
+            records = [dict(g) for g in groups]
+        elif key in self.LEDGER_ENTITIES:
+            records = tally_xml_parser.filter_ledgers_for_entity([dict(l) for l in ledgers], key, tree)
+        else:
+            records = parser_map[key](tally_xml_parser.parse_tally_xml_root(raw))
+        if not records:
+            return 0
+        return (engine.process_inbound_batch(key, records) or {}).get("processed", 0)
 
-        # --- Masters (native collections) ---
-        for cfg in self.entity_config_ids.filtered(
-                lambda c: c.enabled and c.direction in ("tally_to_odoo", "both")):
-            ctype = tally_xml_builder.COLLECTION_MAP.get(cfg.entity)
-            pfn = parser_map.get(cfg.entity)
-            if not ctype or not pfn:
-                continue
+    def _direct_pull(self, include_vouchers=True):
+        """Pull masters and vouchers from Tally (direct mode, no agent)."""
+        self.ensure_one()
+        self._guard_environment()
+        if not self.active:
+            raise UserError(_("Synchronization is disabled because this database appears to be a copy."))
+        from ..services.sync_engine import SyncEngine
+        groups, ledgers, tree = self._refresh_tally_structure()
+        engine = SyncEngine(self.env, self)
+        pulled = 0
+        for key, xml in self._pull_plan(include_vouchers):
             try:
-                from_aid = cfg.last_alterid if self.use_tdl_delta else None
-                fetch_f = None
-                if cfg.entity == "stock_item":
-                    fetch_f = "NAME,GUID,MASTERID,ALTERID,PARENT,BASEUNITS,MAILINGNAME,MAILINGNAME.LIST,BARCODE,HSNCODE,HSNDESCRIPTION,STANDARDCOST,STANDARDPRICE,OPENINGBALANCE,OPENINGVALUE,OPENINGRATE,CLOSINGBALANCE,CLOSINGVALUE,CLOSINGRATE,BATCHALLOCATIONS.LIST"
-                xml = tally_xml_builder.build_collection_export(
-                    ctype, company_name=self.tally_company, from_alterid=from_aid, fetch_fields=fetch_f)
-                resp = tally_transport.post_xml(ep["url"], xml, auth=ep["auth"],
-                                                extra_headers=ep["headers"], verify=ep["verify"])
-                root = tally_xml_parser.parse_tally_xml_root(resp)
-                records = pfn(root) if root is not None else []
-                if cfg.entity in ("ledger", "account_ledger", "tax", "opening_balance"):
-                    records = tally_xml_parser.filter_ledgers_for_entity(records, cfg.entity)
-                if records:
-                    res = engine.process_inbound_batch(cfg.entity, records)
-                    pulled += (res or {}).get("processed", 0)
+                raw = self._tally_post(xml, timeout=300) if xml else None
+                pulled += self._process_pull_step(engine, key, raw, groups, ledgers, tree)
             except Exception as e:
                 self.env["tally.sync.log"].log(
-                    self, "tally_to_odoo", cfg.entity, "error", "Master pull failed: %s" % e)
-
-        # --- Vouchers (Day Book, date range) ---
-        if include_vouchers and self.odoo_role != "operational":
-            voucher_codes = {"sales", "credit_note", "purchase", "debit_note",
-                             "receipt", "payment", "journal", "contra", "stock_journal"}
-            enabled_v = self.entity_config_ids.filtered(
-                lambda c: c.enabled and c.entity in voucher_codes
-                and c.direction in ("tally_to_odoo", "both"))
-            if enabled_v:
-                to_d = date.today()
-                from_d = self.history_from or (to_d - timedelta(days=self.pull_lookback_days or 30))
-                try:
-                    xml = tally_xml_builder.build_voucher_export(from_d, to_d, company_name=self.tally_company)
-                    resp = tally_transport.post_xml(ep["url"], xml, auth=ep["auth"],
-                                                    extra_headers=ep["headers"], verify=ep["verify"])
-                    root = tally_xml_parser.parse_tally_xml_root(resp)
-                    vouchers = tally_xml_parser.parse_vouchers_from_xml(root) if root is not None else []
-                    if vouchers:
-                        res = engine.process_vouchers(vouchers)
-                        pulled += sum((r or {}).get("processed", 0) for r in res.values())
-                except Exception as e:
-                    self.env["tally.sync.log"].log(
-                        self, "tally_to_odoo", "journal", "error", "Voucher pull failed: %s" % e)
+                    self, "tally_to_odoo", key if key != "vouchers" else "journal", "error",
+                    "Pull failed for %s: %s" % (key, e))
         return pulled
+
+    def _outbound_entities(self):
+        return {c.entity for c in self.entity_config_ids
+                if c.enabled and c.direction in ("odoo_to_tally", "both")}
+
+    def action_push_existing_odoo_data(self):
+        """Queue every existing Odoo master and posted document for Tally.
+
+        For a company that already runs Odoo and is starting (or joining) a
+        Tally company. Masters are queued before documents; documents start at
+        *History From* when set. Identical re-pushes are skipped, so running it
+        twice is harmless.
+        """
+        self.ensure_one()
+        entities = self._outbound_entities()
+        env = self.env
+        company = self.company_id
+        shared = ["|", ("company_id", "=", False), ("company_id", "=", company.id)]
+        queued_before = env["tally.sync.queue"].search_count([("instance_id", "=", self.id)])
+        if "uom" in entities:
+            # Only units products actually use; Odoo ships dozens of unused units.
+            env["product.template"].search(shared).uom_id._enqueue_tally_uom()
+        if "stock_group" in entities:
+            env["product.category"].search([])._enqueue_tally_stock_group()
+        if "godown" in entities:
+            env["stock.location"].search([("usage", "=", "internal"), ("company_id", "=", company.id)])._enqueue_tally_godown()
+        if "cost_centre" in entities:
+            env["account.analytic.account"].search(shared)._enqueue_tally_cost_centre()
+        if "tax" in entities:
+            env["account.tax"].search([("company_id", "=", company.id)])._enqueue_tally_tax()
+        if "account_ledger" in entities:
+            Account = env["account.account"]
+            domain = ([("company_ids", "in", company.ids)] if "company_ids" in Account._fields
+                      else [("company_id", "=", company.id)])
+            for account in Account.search(domain):
+                account._enqueue_tally_account()
+        if "ledger" in entities:
+            partners = env["res.partner"].search(shared + [
+                ("parent_id", "=", False), "|", ("customer_rank", ">", 0), ("supplier_rank", ">", 0)])
+            for partner in partners:
+                partner._enqueue_tally_party()
+        if "stock_item" in entities:
+            for template in env["product.template"].search(shared + [("type", "!=", "service")]):
+                template._enqueue_tally_product()
+        date_domain = [("date", ">=", self.history_from)] if self.history_from else []
+        move_types = {"sales": "out_invoice", "credit_note": "out_refund", "purchase": "in_invoice",
+                      "debit_note": "in_refund", "journal": "entry"}
+        wanted = [mt for ent, mt in move_types.items() if ent in entities]
+        if wanted:
+            moves = env["account.move"].search([
+                ("company_id", "=", company.id), ("state", "=", "posted"),
+                ("move_type", "in", wanted)] + date_domain, order="date, id")
+            for move in moves:
+                move._enqueue_tally_voucher()
+        pay_types = [t for ent, t in (("receipt", "inbound"), ("payment", "outbound")) if ent in entities]
+        if pay_types:
+            payments = env["account.payment"].search([
+                ("company_id", "=", company.id), ("state", "not in", ("draft", "cancel")),
+                ("payment_type", "in", pay_types)] + date_domain, order="date, id")
+            for payment in payments:
+                payment._enqueue_tally_payment()
+        if "stock_journal" in entities:
+            pickings = env["stock.picking"].search([
+                ("company_id", "=", company.id), ("state", "=", "done"),
+                ("picking_type_id.code", "=", "internal")])
+            pickings._enqueue_tally_stock_journal()
+        queued = env["tally.sync.queue"].search_count([("instance_id", "=", self.id)]) - queued_before
+        msg = _("%s record(s) queued for Tally. They are sent on the next sync (masters first).") % queued
+        self.message_post(body=msg)
+        return {"type": "ir.actions.client", "tag": "display_notification",
+                "params": {"title": _("Odoo data queued"), "message": msg,
+                           "type": "success", "sticky": False}}
 
     def _pull_notification(self, pulled):
         return {
@@ -786,101 +1085,58 @@ class TallyInstance(models.Model):
         }
 
     def _reconcile_tally_deletions(self, entities=None):
-        """Reconciliation: Identify and flag records deleted directly in Tally.
+        """Flag Odoo records whose Tally object no longer exists.
 
-        Tally's AlterID tracks additions and edits, but never reports deletions.
-        This method queries Tally's live collection manifests for mapped masters,
-        identifies mappings missing from Tally, and marks them as `is_orphan = True`
-        and `state = 'orphan'` without deleting any financial records in Odoo.
+        AlterID deltas never report deletions, so the full GUID set of each
+        collection is compared with the identity map. Only mappings bound to a
+        real Tally GUID are judged; records are flagged (never deleted) for an
+        accountant to review.
         """
         self.ensure_one()
-        import xml.etree.ElementTree as ET
-        from ..services import tally_transport, tally_xml_builder, tally_xml_parser
-
+        from ..services import tally_xml_builder
+        from ..services.sync_engine import SyncEngine
+        voucher_entities = sorted(SyncEngine.DOCUMENT_ENTITIES)
         if not entities:
-            entities = ["currency", "ledger", "group", "stock_item", "uom", "cost_centre"]
-
-        type_collection_map = {
-            "currency": ("Currency", "NAME,GUID,MASTERID,MAILINGNAME"),
-            "ledger": ("Ledger", "NAME,GUID,MASTERID"),
-            "group": ("Group", "NAME,GUID,MASTERID"),
-            "stock_item": ("StockItem", "NAME,GUID,MASTERID"),
-            "uom": ("Unit", "NAME,GUID,MASTERID,ORIGINALNAME"),
-            "cost_centre": ("CostCentre", "NAME,GUID,MASTERID"),
-        }
-
-        ep = self._tally_endpoint()
-        orphan_summary = {}
-
+            entities = ["currency", "group", "ledger", "account_ledger", "tax", "stock_item", "uom",
+                        "stock_group", "godown", "cost_centre"] + voucher_entities
+        collections = {}
         for ent in entities:
-            if ent not in type_collection_map:
-                continue
-            col_type, fetch_fields = type_collection_map[ent]
+            coll = "Voucher" if ent in voucher_entities else self.COLLECTION_FOR_ENTITY.get(ent)
+            if coll:
+                collections.setdefault(coll, []).append(ent)
+        orphan_summary = {}
+        for coll, ents in collections.items():
             try:
-                col_xml = tally_xml_builder.build_collection_export(
-                    col_type, company_name=self.tally_company, fetch_fields=fetch_fields)
-                resp = tally_transport.post_xml(
-                    ep["url"], col_xml, auth=ep["auth"],
-                    extra_headers=ep["headers"], verify=ep["verify"])
-                root = tally_xml_parser.parse_tally_xml_root(resp)
-
-                # Collect all live identifiers and GUIDs from Tally
-                live_ids = set()
-                for el in root.iter():
-                    if el.tag in ("LEDGER", "GROUP", "STOCKITEM", "UNIT", "COSTCENTRE"):
-                        name = el.get("NAME") or (el.findtext("NAME") or "").strip()
-                        guid = (el.findtext("GUID") or "").strip()
-                        mid = (el.findtext("MASTERID") or "").strip()
-                        if name:
-                            live_ids.add(name.lower())
-                        if guid:
-                            live_ids.add(guid.lower())
-                        if mid:
-                            live_ids.add(mid)
-
-                # Safety: an empty result means the export failed or returned nothing.
-                # Never flag orphans on an empty manifest (would delete-flag the whole book).
-                if not live_ids:
+                root = self._tally_export(tally_xml_builder.build_collection_export(
+                    coll, company_name=self.tally_company, fetch_fields="GUID"), timeout=300)
+                live = {(el.findtext("GUID") or "").strip() for el in root.iter(coll.upper())}
+                live.discard("")
+                if not live:
                     self.env["tally.sync.log"].log(
-                        self, "tally_to_odoo", ent, "warning",
-                        _("Deletion reconcile skipped for %s: Tally returned no records (export failed?).") % ent)
+                        self, "tally_to_odoo", False, "warning",
+                        _("Deletion reconcile skipped for %s: Tally returned no records (export failed?).") % coll)
                     continue
-
-                # Find all active mappings for this entity
-                # Only reconcile records that originated in Tally: they carry a real GUID.
-                # Odoo-origin mappings use a synthetic "odoo_*" guid and must never be
-                # treated as "deleted in Tally".
                 mappings = self.env["tally.mapping"].search([
-                    ("instance_id", "=", self.id),
-                    ("entity", "=", ent),
-                    ("state", "!=", "orphan"),
-                    ("last_origin", "=", "tally"),
+                    ("instance_id", "=", self.id), ("entity", "in", ents),
+                    ("tally_guid", "!=", False), ("state", "!=", "orphan"),
                 ])
-
-                orphaned_mappings = []
-                for m in mappings:
-                    guid = (m.tally_guid or "").lower()
-                    mid = str(m.tally_masterid or "")
-                    if not guid or guid.startswith("odoo_"):
-                        continue  # synthetic id — cannot judge deletion
-                    if guid not in live_ids and mid not in live_ids:
-                        orphaned_mappings.append(m)
-
-                if orphaned_mappings:
-                    orphaned_records = self.env["tally.mapping"].browse([m.id for m in orphaned_mappings])
-                    orphaned_records.write({
-                        "is_orphan": True,
-                        "state": "orphan",
-                        "orphan_date": fields.Datetime.now(),
-                    })
-                    orphan_summary[ent] = len(orphaned_mappings)
-                    self.env["tally.sync.log"].log(
-                        self, "tally_to_odoo", ent, "warning",
-                        _("Deletion Reconcile: Found %s orphaned record(s) deleted in Tally.") % len(orphaned_mappings)
-                    )
+                gone = mappings.filtered(lambda m: m.tally_guid not in live)
+                if gone:
+                    gone.write({"is_orphan": True, "state": "orphan", "orphan_date": fields.Datetime.now()})
+                    for ent in set(gone.mapped("entity")):
+                        count = len(gone.filtered(lambda m: m.entity == ent))
+                        orphan_summary[ent] = count
+                        self.env["tally.sync.log"].log(
+                            self, "tally_to_odoo", ent, "warning",
+                            _("Deletion Reconcile: %s record(s) no longer exist in Tally.") % count)
+                # A record deleted earlier and restored in Tally is active again.
+                back = self.env["tally.mapping"].search([
+                    ("instance_id", "=", self.id), ("entity", "in", ents),
+                    ("state", "=", "orphan"), ("tally_guid", "in", list(live)),
+                ])
+                back.write({"is_orphan": False, "state": "active", "orphan_date": False})
             except Exception as e:
-                _logger.warning("Deletion reconcile failed for entity %s on instance %s: %s", ent, self.id, e)
-
+                _logger.warning("Deletion reconcile failed for %s on instance %s: %s", coll, self.id, e)
         return orphan_summary
 
     def action_reconcile_deletions(self):
@@ -918,7 +1174,7 @@ class TallyInstance(models.Model):
 
     def _guard_environment(self):
         """Staging/DB-copy bleed guard: disable sync if the database was cloned."""
-        current = self.env["ir.config_parameter"].sudo().get_param("database.uuid")
+        current = config_param(self.env, "database.uuid")
         for inst in self:
             if not inst.db_uuid:
                 inst.db_uuid = current

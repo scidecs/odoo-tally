@@ -42,19 +42,27 @@ assert (__import__("pathlib").Path(sys.argv[2]) / "static/description/index.html
 print("  manifest OK:", d["name"], d["version"])
 PY
 
-echo "== Odoo 18 compatibility guards =="
-if grep -Rqn --include='*.py' 'models\.Constraint' "$MOD"; then
-    echo "  FAIL found Odoo 19-only models.Constraint"; fail=1
+echo "== Odoo 18 / 19 / 20 compatibility guards =="
+# Odoo 19+ silently ignores _sql_constraints and Odoo 18 lacks models.Constraint:
+# both must only be used through models/compat.py.
+if grep -Rln --include='*.py' 'models\.Constraint' "$MOD" | grep -v 'models/compat.py' | grep -q .; then
+    echo "  FAIL models.Constraint used outside models/compat.py"; fail=1
+elif grep -Rqn --include='*.py' '_sql_constraints = \[' "$MOD/models"; then
+    echo "  FAIL raw _sql_constraints declaration (use compat.sql_constraints)"; fail=1
 else
-    echo "  no Odoo 19-only models.Constraint declarations"
+    echo "  constraints declared through the version-aware helper"
 fi
-if grep -qn 'type="jsonrpc"' "$MOD/controllers/main.py"; then
-    echo "  FAIL found Odoo 19-only jsonrpc route type"; fail=1
-elif [ "$(grep -c 'type="json"' "$MOD/controllers/main.py")" -ne 5 ]; then
-    echo "  FAIL expected five Odoo 18 JSON agent routes"; fail=1
+if grep -qnE 'type="(json|jsonrpc)"' "$MOD/controllers/main.py"; then
+    echo "  FAIL hard-coded route type (use JSON_ROUTE)"; fail=1
+elif [ "$(grep -c 'type=JSON_ROUTE' "$MOD/controllers/main.py")" -ne 6 ]; then
+    echo "  FAIL expected six agent routes using JSON_ROUTE"; fail=1
 else
-    echo "  five Odoo 18 JSON agent routes present"
+    echo "  six version-aware agent routes present"
 fi
+for f in ir.model.access.csv ir_rule_data.xml ir.access.csv; do
+    [ -f "$MOD/security/$f" ] || { echo "  FAIL missing security/$f"; fail=1; }
+done
+echo "  security files present for Odoo 18/19 (ir.model.access + ir.rule) and 20 (ir.access)"
 
 echo "== Store description =="
 python3 - "$MOD/static/description/index.html" <<'PY' || fail=1

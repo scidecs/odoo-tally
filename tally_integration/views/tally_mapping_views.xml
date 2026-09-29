@@ -7,7 +7,10 @@
             <list string="Mappings">
                 <field name="instance_id"/>
                 <field name="entity"/>
+                <field name="tally_name" optional="show"/>
+                <field name="tally_voucher_number" optional="show"/>
                 <field name="tally_guid"/>
+                <field name="tally_alterid" optional="hide"/>
                 <field name="odoo_model_name"/>
                 <field name="odoo_res_id"/>
                 <field name="last_origin"/>
@@ -42,7 +45,13 @@
                             <field name="instance_id"/>
                             <field name="entity"/>
                             <field name="tally_guid"/>
+                            <field name="remote_id"/>
                             <field name="tally_masterid"/>
+                            <field name="tally_alterid"/>
+                            <field name="tally_name"/>
+                            <field name="tally_voucher_type"/>
+                            <field name="tally_voucher_number"/>
+                            <field name="tally_voucher_date"/>
                             <field name="is_orphan"/>
                             <field name="orphan_date" invisible="not is_orphan"/>
                         </group>

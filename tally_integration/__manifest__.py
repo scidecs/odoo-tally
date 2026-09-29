@@ -18,7 +18,7 @@ Configure Tally-first, Odoo-first, or bidirectional ownership with serialized pr
 SHA-256 echo suppression. The module includes a durable outbound queue, token-authenticated routes
 for the optional on-premise agent, and native list, pivot, and graph monitoring views.
 """,
-    "version": "18.0.1.0.0",
+    "version": "18.0.1.2.0",
     "category": "Accounting",
     "author": "Scidecs",
     "maintainer": "Scidecs",

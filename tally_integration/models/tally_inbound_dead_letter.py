@@ -6,6 +6,7 @@ import json
 from odoo import api, fields, models, _
 
 from .constants import ENTITY_SELECTION
+from .compat import sql_constraints
 
 
 class TallyInboundDeadLetter(models.Model):
@@ -35,11 +36,12 @@ class TallyInboundDeadLetter(models.Model):
     last_failed = fields.Datetime(default=fields.Datetime.now, required=True)
     resolved_date = fields.Datetime()
 
-    _sql_constraints = [
+    sql_constraints(
+        locals(),
         ("record_revision_uniq",
          "UNIQUE(instance_id, entity, record_key, tally_alterid)",
          "This inbound Tally record revision is already tracked."),
-    ]
+    )
 
     @api.model
     def _identity(self, entity, record):

@@ -2,6 +2,50 @@
 
 All notable public changes to the Scidecs Odoo–TallyPrime integration are documented here.
 
+## 1.2.0 (18.0.1.2.0 / 19.0.1.2.0 / 20.0.1.2.0) — 2026-09-29
+
+Data-integrity release. Every item below was reproduced against a live TallyPrime gateway before
+it was fixed; the verified TallyPrime behaviours are documented in
+[Sync Integrity Rules](Docs/SYNC_INTEGRITY_RULES.md).
+
+### Added
+
+- Odoo 20 support (unified `ir.access` security, API renames, PostgreSQL 16+), alongside 18 and 19
+  from one code base.
+- Identity binding after every push: Tally's GUID, MasterID, AlterID and voucher number are read
+  back and stored, so pulled read-backs are never imported as new documents.
+- Voucher collection pull by AlterID (and by date on first sync) replacing the Day Book export.
+- Odoo reset-to-draft, cancel and delete mirrored as Tally cancellations; re-posting restores.
+- "Push Existing Odoo Data" onboarding for companies that already run Odoo.
+- Accounting fingerprint and field gating so Tally-owned records are only written back on real edits.
+- Payments re-sent after reconciliation so Tally bill-wise references match.
+- Upgrade migration for identity rows created by earlier releases.
+- Agent relay protocol: Odoo builds every Tally request; the agent is a single standard-library file.
+
+### Corrected
+
+- Duplicate invoices/bills in Odoo after pushing them to Tally (Tally renumbers vouchers and ignores
+  supplied GUIDs).
+- Voucher pull only saw Tally's current date (Day Book ignores date ranges).
+- Voucher Alter/Cancel by number could change a *different* voucher type with the same number.
+- Opening balances imported on the wrong side (Tally negative = debit).
+- Party/tax/journal lines double counted when Tally returned both ledger lists.
+- Parties under custom Sundry Debtors/Creditors sub-groups imported as general ledger accounts.
+- Sales/Purchase Orders and Delivery/Receipt Notes imported as invoices; custom voucher types
+  misrouted.
+- Ledgers such as "Processing Fees" or "Renovation" treated as CESS/VAT tax ledgers.
+- SGST ledgers mapped onto the CGST tax (halving GST); imported GST posted to Sales/Purchases.
+- GST on expense ledgers and custom allocations forced into a reconciliation plug (now exact lines).
+- Round-off and charge lines with inverted signs; cash sales invoiced to a contact named "Cash";
+  expense payments imported as payments to a contact named after the expense.
+- Journals/payments with the same narration merged into one Odoo entry.
+- Renames in Odoo created a second Tally master; Tally renames created a second Odoo record.
+- Tally edits and cancellations not applied to posted Odoo documents.
+- Deletion reconcile flagging every Tally-origin master as deleted.
+- Unique constraints silently absent on Odoo 19 (`_sql_constraints` ignored).
+- Multi-company imports using the first company's account codes and partner accounts.
+- Duplicate master names in one import raising a TallyPrime internal error.
+
 ## 18.0.1.0.0 — 2026-09-09
 
 ### Added

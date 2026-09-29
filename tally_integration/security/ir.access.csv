@@ -1,0 +1,25 @@
+id,name,model_id,group_id/id,operation,domain
+access_tally_instance_user,tally.instance.user,tally.instance,group_tally_user,r,
+access_tally_instance_manager,tally.instance.manager,tally.instance,group_tally_manager,crud,
+tally_instance_company_rule,Tally Instance: multi-company,tally.instance,,crud,"['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]"
+access_tally_entity_config_user,tally.entity.config.user,tally.entity.config,group_tally_user,r,
+access_tally_entity_config_manager,tally.entity.config.manager,tally.entity.config,group_tally_manager,crud,
+tally_entity_config_company_rule,Tally Entity Config: multi-company,tally.entity.config,,crud,"['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]"
+access_tally_mapping_user,tally.mapping.user,tally.mapping,group_tally_user,r,
+access_tally_mapping_manager,tally.mapping.manager,tally.mapping,group_tally_manager,crud,
+tally_mapping_company_rule,Tally Mapping: multi-company,tally.mapping,,crud,"['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]"
+access_tally_sync_log_user,tally.sync.log.user,tally.sync.log,group_tally_user,r,
+access_tally_sync_log_manager,tally.sync.log.manager,tally.sync.log,group_tally_manager,crud,
+tally_sync_log_company_rule,Tally Sync Log: multi-company,tally.sync.log,,crud,"['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]"
+access_tally_sync_queue_user,tally.sync.queue.user,tally.sync.queue,group_tally_user,r,
+access_tally_sync_queue_manager,tally.sync.queue.manager,tally.sync.queue,group_tally_manager,crud,
+tally_sync_queue_company_rule,Tally Sync Queue: multi-company,tally.sync.queue,,crud,"['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]"
+access_tally_inbound_dead_letter_user,tally.inbound.dead.letter.user,tally.inbound.dead.letter,group_tally_user,r,
+access_tally_inbound_dead_letter_manager,tally.inbound.dead.letter.manager,tally.inbound.dead.letter,group_tally_manager,crud,
+tally_inbound_dead_letter_company_rule,Tally Quarantine: multi-company,tally.inbound.dead.letter,,crud,"['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]"
+access_tally_account_type_map_user,tally.account.type.map.user,tally.account.type.map,group_tally_user,r,
+access_tally_account_type_map_manager,tally.account.type.map.manager,tally.account.type.map,group_tally_manager,crud,
+access_tally_discovered_company_user,tally.discovered.company.user,tally.discovered.company,group_tally_user,r,
+access_tally_discovered_company_manager,tally.discovered.company.manager,tally.discovered.company,group_tally_manager,crud,
+tally_discovered_company_rule,Tally Discovered Company: multi-company,tally.discovered.company,,crud,"['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]"
+access_tally_onboarding_manager,tally.onboarding.manager,tally.onboarding,group_tally_manager,crud,

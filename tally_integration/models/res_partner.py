@@ -14,6 +14,7 @@ _logger = logging.getLogger(__name__)
 
 class ResPartner(models.Model):
     _inherit = "res.partner"
+    TALLY_FIELDS = {"name", "vat", "street", "street2", "city", "zip", "state_id", "country_id", "email", "phone", "mobile", "credit_limit", "parent_id", "is_company"}
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -25,7 +26,7 @@ class ResPartner(models.Model):
 
     def write(self, vals):
         res = super().write(vals)
-        if not self.env.context.get("tally_no_sync"):
+        if not self.env.context.get("tally_no_sync") and self.TALLY_FIELDS.intersection(vals):
             for rec in self:
                 rec._enqueue_tally_party()
         return res
@@ -33,60 +34,41 @@ class ResPartner(models.Model):
     def _enqueue_tally_party(self):
         self.ensure_one()
         try:
-            if not self.name:
+            # Tally has one ledger per business: individual contacts of a
+            # company roll up into their commercial entity.
+            if not self.name or self.parent_id:
                 return
-            company = self.company_id or self.env.company
-            instance = self.env["tally.instance"].search(
-                [("company_id", "=", company.id), ("active", "=", True)], limit=1)
-            if not instance:
-                return
-            cfg = instance.entity_config_ids.filtered(
-                lambda c: c.entity == "ledger" and c.enabled)
-            if not cfg or cfg.direction not in ("odoo_to_tally", "both"):
-                return
-
             from ..services import tally_xml_builder
-            guid = self.env["tally.mapping"].outbound_guid(
-                instance, "ledger", self._name, self.id)
-            parent_group = "Sundry Creditors" if self.supplier_rank > 0 else "Sundry Debtors"
-            msg_xml = tally_xml_builder.build_party_ledger_xml(
-                name=self.name,
-                parent=parent_group,
-                gstin=self.vat,
-                pan=self.vat[2:12] if (self.vat and len(self.vat) == 15) else None,
-                address_lines=[self.street, self.street2],
-                state_name=self.state_id.name if self.state_id else None,
-                country_name=self.country_id.name if self.country_id else "India",
-                pincode=self.zip,
-                email=self.email,
-                phone=self.phone or getattr(self, "mobile", None),
-                credit_limit=getattr(self, "credit_limit", 0.0),
-                guid=guid,
-            )
-            envelope_xml = tally_xml_builder.wrap_import_envelope(
-                [msg_xml], company_name=instance.tally_company)
-
-            should_enqueue = self.env["tally.mapping"].register_outbound(
-                instance=instance,
-                entity="ledger",
-                model_name=self._name,
-                res_id=self.id,
-                payload_xml=envelope_xml,
-                guid=guid,
-                allow_tally_origin=True,
-            )
-            if not should_enqueue:
-                return
-
-            self.env["tally.sync.queue"].create({
-                "instance_id": instance.id,
-                "entity": "ledger",
-                "odoo_model_name": self._name,
-                "odoo_res_id": self.id,
-                "idempotency_key": "odoo_partner_%s_%s" % (
-                    self.id, self.write_date and self.write_date.strftime("%Y%m%d%H%M%S") or ""),
-                "payload": envelope_xml,
-                "state": "pending",
-            })
+            from .tally_outbound import enqueue, target_instances
+            Mapping = self.env["tally.mapping"].sudo()
+            for instance in target_instances(self.env, "ledger", self.company_id):
+                guid = Mapping.outbound_guid(instance, "ledger", self._name, self.id)
+                old_name = Mapping.outbound_address(instance, "ledger", self._name, self.id).get("name")
+                # Keep an existing ledger in the group Tally has it in (possibly a
+                # custom sub-group); ranks change as documents are posted and must
+                # not move the ledger between Debtors and Creditors.
+                known = instance._get_ledger_index().get((old_name or self.name).strip().lower(), {})
+                parent_group = known.get("parent") or (
+                    "Sundry Creditors" if self.supplier_rank > self.customer_rank else "Sundry Debtors")
+                vat = (self.vat or "").strip()
+                msg_xml = tally_xml_builder.build_party_ledger_xml(
+                    name=self.name,
+                    parent=parent_group,
+                    gstin=vat or None,
+                    pan=vat[2:12] if len(vat) == 15 else None,
+                    address_lines=[self.street, self.street2, self.city],
+                    state_name=self.state_id.name if self.state_id else None,
+                    country_name=self.country_id.name if self.country_id else "India",
+                    pincode=self.zip,
+                    email=self.email,
+                    phone=self.phone or getattr(self, "mobile", None),
+                    credit_limit=getattr(self, "credit_limit", 0.0),
+                    guid=guid,
+                    old_name=old_name,
+                )
+                envelope_xml = tally_xml_builder.wrap_import_envelope(
+                    [msg_xml], company_name=instance.tally_company)
+                enqueue(instance, "ledger", self, envelope_xml, guid,
+                        tally_name_value=self.name, allow_tally_origin=True)
         except Exception as e:
             _logger.warning("Tally party enqueue skipped for partner %s: %s", self.id, e)

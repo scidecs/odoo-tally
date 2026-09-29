@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from odoo import fields, models
 from .constants import ENTITY_SELECTION, SOURCE_OF_TRUTH_SELECTION, DIRECTION_SELECTION
+from .compat import sql_constraints
 
 
 class TallyEntityConfig(models.Model):
@@ -26,7 +27,8 @@ class TallyEntityConfig(models.Model):
         help="Delta watermark for Tally → Odoo polling.")
     last_sync = fields.Datetime(readonly=True)
 
-    _sql_constraints = [
+    sql_constraints(
+        locals(),
         ("entity_instance_uniq", "UNIQUE(instance_id, entity)",
          "Only one configuration per entity per instance."),
-    ]
+    )

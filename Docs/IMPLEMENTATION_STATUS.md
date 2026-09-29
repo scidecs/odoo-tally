@@ -1,64 +1,74 @@
 # Odoo Tally Integration — Verified Implementation Status
 
-Last updated: 2026-09-09
+Last updated: 2026-09-29 (release 1.2.0: 18.0.1.2.0 / 19.0.1.2.0 / 20.0.1.2.0)
 
 This file is the release-scope ledger. A feature is marked verified only when executable code
 and an applicable automated or live test exist. Marketing checklists must not expand the product
-boundary without adding the required Odoo dependency, implementation, and tests.
+boundary without adding the required Odoo dependency, implementation, and tests. The TallyPrime
+behaviours the sync relies on are listed in [Sync Integrity Rules](SYNC_INTEGRITY_RULES.md).
+
+## Supported Odoo versions
+
+| Odoo | Branch | Security files | Verified on |
+|---|---|---|---|
+| 18.0 | `18.0` | `ir.model.access.csv` + `ir_rule_data.xml` | Enterprise 18.0, PostgreSQL 15 |
+| 19.0 | `19.0` | `ir.model.access.csv` + `ir_rule_data.xml` | Enterprise 19.0, PostgreSQL 15 |
+| 20.0 | `20.0` | `ir.access.csv` (Odoo 20 unified access) | Enterprise 20.0, PostgreSQL 17 (Odoo 20 needs 16+) |
+
+One code base; branches differ only in the manifest (version and security data files).
 
 ## Supported product boundary
 
 | Capability | Direction | Status | Verification |
 |---|---|---|---|
-| Account groups and general ledgers | Tally → Odoo; accounts Odoo → Tally | Implemented | Fresh Odoo 18 install; XML tests |
-| Party ledgers and GST identity | Both | Implemented | XML round-trip; Odoo engine tests |
-| Units, stock groups, items, godowns, cost centres | Both where configured | Implemented | Parser/build tests; fresh install; live products/transfer |
-| Products and stock items | Both | Implemented | XML round-trip; Odoo engine tests |
-| Opening balances | Tally → Odoo | Implemented | Balanced journal implementation; Odoo transactional test |
-| Sales, purchases, credit/debit notes | Both where configured | Implemented | Invoice total regression; live Tally round trip |
-| Receipts and payments | Both where configured | Implemented | Odoo outbound queue test; bill allocation paths |
-| Journal and contra vouchers | Both / inbound as configured | Implemented | Balanced-entry logic; Odoo load validation |
-| Stock Journal internal transfers | Both where configured | Implemented | Odoo 18 transactional test; native live Tally import/export |
-| GST ledger and per-item rate mapping | Tally → Odoo | Implemented | Parser tests; mixed-rate allocation logic |
-| Direct gateway transport | Both | Implemented | Existing live connection plus isolated install |
-| On-premise agent fallback | Both | Implemented | Entity-specific polling, voucher routing, leased queue recovery |
-| Multi-company isolation | Both | Implemented | Company fields, ACLs, record rules, per-instance identity |
-| Monitoring, retries, deletion reconciliation | Both | Implemented | Native views, crons, queue state machine |
-| Inbound poison-record quarantine and targeted retry | Tally → Odoo | Implemented | Dedicated dead-letter model; threshold/retry/echo-resolution tests |
+| Account groups and general ledgers (group-hierarchy typing) | Both | Implemented | Live matrix; unit tests |
+| Party ledgers incl. custom Sundry Debtors/Creditors sub-groups, GSTIN, state | Both | Implemented | Live matrix; parser tests |
+| Units, stock groups, items, godowns, cost centres | Both where configured | Implemented | Unit tests; live push |
+| Opening balances (Tally negative = debit) | Tally → Odoo | Implemented | `$$IsDr` verified live; unit test |
+| Sales, purchases, credit/debit notes (Odoo taxes or exact Tally lines) | Both | Implemented | Live matrix; unit tests |
+| Receipts and payments (bill references refreshed after reconciliation) | Both | Implemented | Live matrix |
+| Journal, contra, cash sales/purchases, direct expense payments | Both | Implemented | Live matrix; unit tests |
+| Stock Journal internal transfers | Both where configured | Implemented | Unit tests |
+| GST ledgers (per-ledger taxes and accounts) | Both | Implemented | Live matrix (GST vouchers); unit tests |
+| Edits, cancellations and renames in either system | Both | Implemented | Live matrix steps 3–7 |
+| Onboarding: Tally in use / Odoo in use / both new | Both | Implemented | Live scenarios s1–s3 |
+| Multi-company (one Tally company per Odoo company, shared contacts) | Both | Implemented | Live scenario s4; unit test |
+| Direct gateway transport | Both | Implemented | Live matrix |
+| On-premise agent relay | Both | Implemented | Live agent end-to-end |
+| Deletion reconcile (flag only), quarantine, retries, monitoring | Both | Implemented | Unit tests |
+| Upgrade from releases before 1.2.0 | — | Implemented | Migration test from 19.0.1.1.0 |
 
 ## Explicitly outside this addon's scope
-
-These are not Tally transport features and are not claimed as implemented:
 
 - Manufacturing orders, BOMs, work centres, or MRP valuation (`mrp`).
 - Landed-cost calculation (`stock_landed_costs`).
 - Fixed-asset depreciation (`account_asset`).
-- Government IRN generation/signing, E-Way Bill submission, or cancellation services
-  (`l10n_in_edi` and an authorized provider).
+- Government IRN generation/signing, E-Way Bill submission, or cancellation services.
 - GSTR return preparation, filing, or portal reconciliation.
 - Odoo procurement rules, replenishment, dropshipping, or pricelist synchronization.
+- Replicating bank-statement matching entries; reconcile the bank in the system that owns it.
 
-Tally-origin IRN/E-Way identifiers may be retained as reference metadata when corresponding Odoo
-fields exist; that is not equivalent to generating or filing statutory documents.
+## Known operating constraints
 
-## Release gates
+- A voucher typed in Tally can be changed from Odoo only when its date and voucher number are
+  unique across voucher types in Tally (checked live before sending); otherwise the edit is
+  refused with a clear error and must be made in Tally.
+- A TallyPrime internal-error dialog stops its XML server until it is closed on the Tally machine;
+  the connector avoids the known triggers and the queue retries afterwards.
 
-The repository currently passes:
+## Release gates (all passing)
 
-1. Python compilation, XML well-formedness, and manifest validation.
-2. Eight standalone XML/parser regression tests.
-3. Fresh Odoo 18 installation on an isolated database.
-4. Twenty-three Odoo post-install test methods (27 framework counts), with zero failures and zero errors,
-   covering failed-watermark safety, quarantine and targeted retry, echo suppression, stable identity,
-   ownership policy, inventory-invoice fidelity, opening balances, stock idempotency, product queue
-   deduplication, dated rates and Stock Journal transfer creation.
-5. Real TallyPrime round trip from Odoo 18 Enterprise covering 15 products, purchases, sales, both returns, CGST/SGST,
-   receipt, payment, journal and internal transfer.
-6. Fresh-database recovery, repeat-pull idempotency, and verified/restored price edits in both
-   directions.
-7. A 1080p live demonstration that creates a synthetic product in Odoo, shows the split-screen
-   handoff, and verifies its exact name and SKU/part number in TallyPrime.
+1. Python compilation, XML well-formedness, manifest and cross-version guards (`scripts/run_stage_checks.sh`).
+2. 8 standalone XML/parser tests.
+3. 48 Odoo post-install tests with zero failures on **each** of Odoo 18, 19 and 20.
+4. Live integrity matrix against TallyPrime: 4 scenarios × 3 Odoo versions = 12 runs, 45 audit
+   steps, **0 issues**. Each audit compares every Tally ledger closing balance with Odoo (up to 112
+   ledgers and 102 vouchers per run), checks duplicate/unlinked documents and failed queue items,
+   and repeats a sync cycle that must change nothing.
+5. Live on-premise agent end-to-end: 18 outbound items acknowledged and bound, 165 inbound records,
+   two audits at 126 ledgers with 0 issues, idempotent repeat cycle.
+6. Upgrade migration from 19.0.1.1.0 verified on a database created with that release.
 
-A customer deployment is complete only after UAT against that customer's TallyPrime release,
-voucher configurations, GST ledgers, security proxy, fiscal periods, and representative data.
-No responsible integration can promise universal zero-error operation without this deployment UAT.
+The harness is in `scripts/integrity/`. A customer deployment is complete only after running it
+(and functional UAT) against that customer's TallyPrime release, voucher types, GST ledgers,
+security proxy, fiscal periods and representative data.

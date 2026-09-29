@@ -1,39 +1,55 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""TallyPrime On-Premise Sync Agent.
+"""TallyPrime On-Premise Sync Agent (relay).
 
-A lightweight, standalone Python daemon that runs alongside TallyPrime on the
-local machine/network.
+Runs beside TallyPrime when Odoo cannot reach Tally's XML gateway directly.
+It holds no business logic: Odoo supplies every Tally request, the agent
+posts it to Tally and relays the raw response back. Standard library only;
+a single file you can copy to the Tally PC.
 
-Responsibilities:
-1. Outbound-only HTTPS to Odoo controllers (/tally/agent/*) using X-Tally-Token.
-2. Reports heartbeat and open Tally company files.
-3. Polls Tally's XML Gateway (port 9000) for AlterID deltas and pushes them to Odoo.
-4. Pulls outbound XML import envelopes from Odoo and posts them to Tally XML Gateway.
-5. Acknowledges results back to Odoo queue.
+Loop:
+1. heartbeat -> Odoo returns the structure requests and the pull plan when a
+   pull is due; the agent runs them and relays all responses in one call.
+2. pull outbound queue (masters first) -> import into Tally -> ask Odoo for the
+   identity read-back request -> relay the response with the acknowledgement.
 """
 import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
-import urllib.request
 import urllib.error
-import xml.etree.ElementTree as ET
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODULE_ROOT = os.path.join(ROOT, "tally_integration")
-if MODULE_ROOT not in sys.path:
-    sys.path.insert(0, MODULE_ROOT)
-from services import tally_transport, tally_xml_builder
+import urllib.request
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("TallySyncAgent")
+
+COMPANY_LIST_XML = """<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>
+<TYPE>Collection</TYPE><ID>OtiCompanies</ID></HEADER><BODY><DESC><STATICVARIABLES>
+<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE>
+<COLLECTION NAME="OtiCompanies" ISMODIFY="No"><TYPE>Company</TYPE><FETCH>Name</FETCH></COLLECTION>
+</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"""
+
+
+def parse_import_response(text):
+    """Counts and first LINEERROR from a Tally import reply."""
+    def _int(tag):
+        m = re.search(r"<%s>(-?\d+)</%s>" % (tag, tag), text or "")
+        return int(m.group(1)) if m else 0
+    m = re.search(r"<LINEERROR>(.*?)</LINEERROR>", text or "", re.S)
+    line_error = m.group(1).strip() if m else None
+    return {
+        "created": _int("CREATED"), "altered": _int("ALTERED"), "deleted": _int("DELETED"),
+        "combined": _int("COMBINED"), "ignored": _int("IGNORED"),
+        "errors": _int("ERRORS") or _int("EXCEPTIONS") or (1 if line_error else 0),
+        "line_error": line_error, "last_vch_id": _int("LASTVCHID"),
+    }
 
 
 class TallyAgent:
@@ -43,210 +59,146 @@ class TallyAgent:
         self.tally_url = f"http://{tally_host}:{tally_port}"
         self.poll_interval = poll_interval
         self.running = True
-        self.tally_company = None
-        self.inbound_entities = []
 
-    # -------------------------------------------------------------------------
-    # ODOO HTTP CLIENT
-    # -------------------------------------------------------------------------
-    def _call_odoo(self, endpoint, payload=None):
-        """Call Odoo JSON-RPC / JSON endpoint."""
+    def _call_odoo(self, endpoint, payload=None, timeout=300):
         url = f"{self.odoo_url}{endpoint}"
-        headers = {
-            "Content-Type": "application/json",
-            "X-Tally-Token": self.token,
-        }
-        body = json.dumps({"params": payload or {}}).encode("utf-8")
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        body = json.dumps({"jsonrpc": "2.0", "params": payload or {}}).encode("utf-8")
+        req = urllib.request.Request(url, data=body, method="POST", headers={
+            "Content-Type": "application/json", "X-Tally-Token": self.token})
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                res_data = json.loads(resp.read().decode("utf-8"))
-                if "error" in res_data:
-                    logger.error(f"Odoo error response on {endpoint}: {res_data['error']}")
-                    return None
-                return res_data.get("result", {})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
         except Exception as e:
-            logger.error(f"Failed to communicate with Odoo at {url}: {e}")
+            logger.error("Odoo call %s failed: %s", endpoint, e)
             return None
-
-    # -------------------------------------------------------------------------
-    # TALLY HTTP CLIENT
-    # -------------------------------------------------------------------------
-    def _call_tally(self, xml_payload):
-        """Send raw XML request to Tally XML Gateway."""
-        req = urllib.request.Request(
-            self.tally_url,
-            data=xml_payload.encode("utf-8"),
-            headers={"Content-Type": "text/xml;charset=utf-8"},
-            method="POST"
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return resp.read().decode("utf-8", errors="replace")
-        except Exception as e:
-            logger.error(f"Failed to communicate with Tally at {self.tally_url}: {e}")
+        if "error" in data:
+            logger.error("Odoo error on %s: %s", endpoint, data["error"])
             return None
+        result = data.get("result") or {}
+        if isinstance(result, dict) and result.get("error"):
+            logger.error("Odoo refused %s: %s", endpoint, result["error"])
+            return None
+        return result
 
-    # -------------------------------------------------------------------------
-    # AGENT ROUTINES
-    # -------------------------------------------------------------------------
-    def heartbeat(self):
-        """Send heartbeat to Odoo."""
-        res = self._call_odoo("/tally/agent/heartbeat")
-        if res and res.get("ok"):
-            if "poll_interval" in res:
-                self.poll_interval = int(res["poll_interval"])
-            self.tally_company = res.get("tally_company") or self.tally_company
-            self.inbound_entities = res.get("entities") or []
-            logger.info("Heartbeat acknowledged by Odoo")
-            return True
-        return False
+    def _call_tally(self, xml_payload, timeout=300):
+        req = urllib.request.Request(self.tally_url, data=(xml_payload or "").encode("utf-8"),
+                                     method="POST", headers={"Content-Type": "text/xml;charset=utf-8"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
 
     def discover_companies(self):
-        """Query Tally for loaded companies and report to Odoo."""
-        query_xml = """<ENVELOPE>
-  <HEADER><TALLYREQUEST>Export Data</TALLYREQUEST></HEADER>
-  <BODY>
-    <EXPORTDATA>
-      <REQUESTDESC>
-        <REPORTNAME>List of Companies</REPORTNAME>
-      </REQUESTDESC>
-    </EXPORTDATA>
-  </BODY>
-</ENVELOPE>"""
-        resp_xml = self._call_tally(query_xml)
-        if not resp_xml:
-            return
-
-        companies = []
         try:
-            root = ET.fromstring(resp_xml)
-            for c in root.iter("COMPANY"):
-                name = c.attrib.get("NAME") or (c.find("NAME").text if c.find("NAME") is not None else None)
-                if name and name not in companies:
-                    companies.append(name.strip())
+            names = re.findall(r'<COMPANY NAME="([^"]+)"', self._call_tally(COMPANY_LIST_XML, timeout=30))
         except Exception as e:
-            logger.warning(f"Could not parse discovered companies XML: {e}")
-
-        if companies:
-            logger.info(f"Discovered Tally companies: {companies}")
-            self._call_odoo("/tally/agent/companies", {"companies": companies})
-
-    def poll_and_push_deltas(self):
-        """Poll Tally for new/altered records and push to Odoo."""
-        voucher_entities = {
-            "sales", "credit_note", "purchase", "debit_note", "receipt",
-            "payment", "journal", "contra", "stock_journal",
-        }
-        voucher_enabled = False
-        for config in self.inbound_entities:
-            entity = config.get("entity")
-            if entity in voucher_entities:
-                voucher_enabled = True
-                continue
-            collection = tally_xml_builder.COLLECTION_MAP.get(entity)
-            if not collection:
-                continue
-            export_xml = tally_xml_builder.build_collection_export(
-                collection,
-                company_name=self.tally_company,
-                from_alterid=config.get("last_alterid") or None,
-            )
-            tally_resp = self._call_tally(export_xml)
-            if tally_resp and "<ENVELOPE" in tally_resp:
-                self._call_odoo("/tally/agent/push", {
-                    "entity": entity,
-                    "xml_payload": tally_resp,
-                })
-        if voucher_enabled:
-            from datetime import date, timedelta
-            export_xml = tally_xml_builder.build_voucher_export(
-                date.today() - timedelta(days=30), date.today(), self.tally_company)
-            tally_resp = self._call_tally(export_xml)
-            if tally_resp and "<ENVELOPE" in tally_resp:
-                self._call_odoo("/tally/agent/push", {
-                    "entity": "vouchers", "xml_payload": tally_resp,
-                })
-
-    def pull_and_write_outbound(self):
-        """Pull pending outbound items from Odoo and import them into Tally."""
-        res = self._call_odoo("/tally/agent/pull", {"limit": 20})
-        if not res or not res.get("items"):
+            logger.warning("Company discovery failed: %s", e)
             return
+        if names:
+            self._call_odoo("/tally/agent/companies", {"companies": sorted(set(names))})
 
-        items = res["items"]
-        logger.info(f"Pulled {len(items)} outbound items from Odoo")
-        ack_results = []
+    def pull_from_tally(self, hb):
+        """Run the Odoo-built export requests and relay the raw responses."""
+        structure = {}
+        for key, xml in (hb.get("structure_requests") or {}).items():
+            try:
+                structure[key] = self._call_tally(xml)
+            except Exception as e:
+                logger.warning("Structure request %s failed: %s", key, e)
+                if key in ("groups", "ledgers"):
+                    return
+        steps = []
+        for key, xml in hb.get("pull_plan") or []:
+            try:
+                steps.append([key, self._call_tally(xml) if xml else None])
+            except Exception as e:
+                logger.error("Pull step %s failed: %s", key, e)
+                return
+        res = self._call_odoo("/tally/agent/push", {"structure": structure, "steps": steps}, timeout=1800)
+        if res:
+            logger.info("Pull relayed: %s record(s) processed, failed steps: %s",
+                        res.get("processed"), res.get("failed"))
 
+    def push_to_tally(self):
+        """Import pending Odoo changes into Tally and acknowledge with identity."""
+        res = self._call_odoo("/tally/agent/pull", {"limit": 50})
+        items = (res or {}).get("items") or []
+        if not items:
+            return
+        acks = []
         for item in items:
-            q_id = item.get("id")
-            payload = item.get("payload")
-            if not payload:
-                ack_results.append({"id": q_id, "ok": False, "error": "Empty payload"})
+            if item.get("verify_request"):
+                # Tally matches date + number across voucher types: only send when
+                # exactly the linked voucher carries that date and number.
+                try:
+                    guids = re.findall(r"<GUID[^>]*>([^<]+)</GUID>", self._call_tally(item["verify_request"], timeout=60))
+                except Exception as e:
+                    acks.append({"id": item["id"], "ok": False, "error": "Tally unreachable: %s" % e})
+                    break
+                if guids != [item.get("expected_guid")]:
+                    acks.append({"id": item["id"], "ok": False,
+                                 "error": "Ambiguous Tally voucher number; edit this voucher in Tally."})
+                    continue
+            try:
+                parsed = parse_import_response(self._call_tally(item.get("payload") or ""))
+            except Exception as e:
+                acks.append({"id": item["id"], "ok": False, "error": "Tally unreachable: %s" % e})
+                break
+            changed = sum(parsed[k] for k in ("created", "altered", "deleted", "combined", "ignored"))
+            if parsed["errors"] or parsed["line_error"] or not changed:
+                acks.append({"id": item["id"], "ok": False,
+                             "error": parsed["line_error"] or "Ambiguous Tally response"})
                 continue
-
-            tally_resp = self._call_tally(payload)
-            if tally_resp:
-                parsed = tally_transport.parse_import_response(tally_resp)
-                if parsed["errors"] == 0 and (parsed["created"] or parsed["altered"] or parsed["deleted"]):
-                    ack_results.append({"id": q_id, "ok": True})
-                    logger.info(f"Successfully wrote item {q_id} to Tally")
-                elif parsed["errors"] or parsed.get("line_error"):
-                    err_msg = tally_resp
-                    try:
-                        err_root = ET.fromstring(tally_resp)
-                        line_err = err_root.find(".//LINEERROR")
-                        if line_err is not None and line_err.text:
-                            err_msg = line_err.text
-                    except Exception:
-                        pass
-                    ack_results.append({"id": q_id, "ok": False, "error": err_msg})
-                else:
-                    ack_results.append({
-                        "id": q_id, "ok": False,
-                        "error": "Ambiguous Tally response: no created/altered/deleted count",
-                    })
-            else:
-                ack_results.append({"id": q_id, "ok": False, "error": "Tally gateway unreachable"})
-
-        if ack_results:
-            self._call_odoo("/tally/agent/ack", {"results": ack_results})
+            ack = {"id": item["id"], "ok": True, "last_vch_id": parsed["last_vch_id"]}
+            ident = self._call_odoo("/tally/agent/identity",
+                                    {"item_id": item["id"], "last_vch_id": parsed["last_vch_id"]})
+            if ident and ident.get("request"):
+                try:
+                    ack["identity_response"] = self._call_tally(ident["request"], timeout=60)
+                except Exception as e:
+                    logger.warning("Identity read-back failed for item %s: %s", item["id"], e)
+            acks.append(ack)
+        self._call_odoo("/tally/agent/ack", {"results": acks})
+        logger.info("Pushed %s item(s) to Tally", len(acks))
 
     def run(self):
-        """Main agent loop."""
-        logger.info(f"Starting Tally Sync Agent (Odoo: {self.odoo_url}, Tally: {self.tally_url})")
-        try:
-            while self.running:
-                try:
-                    self.heartbeat()
+        logger.info("Tally Sync Agent (Odoo: %s, Tally: %s)", self.odoo_url, self.tally_url)
+        while self.running:
+            try:
+                hb = self._call_odoo("/tally/agent/heartbeat")
+                if hb:
+                    self.poll_interval = int(hb.get("poll_interval") or self.poll_interval)
                     self.discover_companies()
-                    self.poll_and_push_deltas()
-                    self.pull_and_write_outbound()
-                except Exception as e:
-                    logger.exception("Error in sync cycle: %s", e)
-                time.sleep(self.poll_interval)
-        except KeyboardInterrupt:
-            logger.info("Tally Sync Agent stopped")
+                    # Push first: Odoo-created objects must be bound before the
+                    # next pull reads them back.
+                    self.push_to_tally()
+                    if hb.get("pull_due"):
+                        self.pull_from_tally(hb)
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                logger.exception("Sync cycle failed: %s", e)
+            time.sleep(self.poll_interval)
 
 
 def main():
     parser = argparse.ArgumentParser(description="TallyPrime On-Premise Sync Agent")
-    parser.add_argument("--odoo-url", default=os.getenv("ODOO_URL", "http://localhost:8069"), help="Odoo base URL")
-    parser.add_argument("--token", default=os.getenv("AGENT_TOKEN"), help="Agent Bearer Token")
-    parser.add_argument("--tally-host", default=os.getenv("TALLY_HOST", "127.0.0.1"), help="Tally host")
-    parser.add_argument("--tally-port", type=int, default=int(os.getenv("TALLY_PORT", 9000)), help="Tally port")
-    parser.add_argument("--interval", type=int, default=int(os.getenv("POLL_INTERVAL", 60)), help="Poll interval (seconds)")
-
+    parser.add_argument("--odoo-url", default=os.getenv("ODOO_URL", "http://localhost:8069"))
+    parser.add_argument("--token", default=os.getenv("AGENT_TOKEN"))
+    parser.add_argument("--tally-host", default=os.getenv("TALLY_HOST", "127.0.0.1"))
+    parser.add_argument("--tally-port", type=int, default=int(os.getenv("TALLY_PORT", 9000)))
+    parser.add_argument("--interval", type=int, default=int(os.getenv("POLL_INTERVAL", 60)))
+    parser.add_argument("--once", action="store_true", help="Run a single sync cycle and exit.")
     args = parser.parse_args()
     if not args.token:
         parser.error("--token is required (or set AGENT_TOKEN)")
-    agent = TallyAgent(
-        odoo_url=args.odoo_url,
-        token=args.token,
-        tally_host=args.tally_host,
-        tally_port=args.tally_port,
-        poll_interval=args.interval,
-    )
+    agent = TallyAgent(args.odoo_url, args.token, args.tally_host, args.tally_port, args.interval)
+    if args.once:
+        agent.running = False
+        hb = agent._call_odoo("/tally/agent/heartbeat")
+        if hb:
+            agent.push_to_tally()
+            if hb.get("pull_due"):
+                agent.pull_from_tally(hb)
+        return
     agent.run()
 
 

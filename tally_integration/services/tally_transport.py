@@ -89,4 +89,13 @@ def parse_import_response(text):
         "ignored": _int("IGNORED"),
         "errors": errors,
         "line_error": line_error,
+        # MasterID of the last voucher Tally created/altered in this import.
+        "last_vch_id": _int("LASTVCHID"),
+        "last_master_id": _int("LASTMID"),
     }
+
+
+def is_educational_date_error(line_error):
+    """TallyPrime Educational only accepts the 1st, 2nd and 31st of a month and
+    reports any other date as 'Voucher date is missing'."""
+    return bool(line_error) and "voucher date is missing" in line_error.lower()
