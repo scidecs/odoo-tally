@@ -103,6 +103,19 @@ for image in parser.images:
 print(f"  {len(parser.images)} local images, all present with alt text; no scripts")
 PY
 
+echo "== Release notes =="
+if cmp -s "$ROOT/CHANGELOG.md" "$MOD/CHANGELOG.md"; then
+    echo "  module CHANGELOG.md matches the repository changelog"
+else
+    echo "  FAIL tally_integration/CHANGELOG.md differs from CHANGELOG.md (copy it)"; fail=1
+fi
+VER=$(python3 -c "import ast,sys; s=open(sys.argv[1]).read(); print(ast.literal_eval(s[s.index('{'):])['version'])" "$MOD/__manifest__.py")
+if grep -q "$VER" "$ROOT/CHANGELOG.md" && grep -q "$VER" "$MOD/static/description/index.html"; then
+    echo "  $VER is documented in CHANGELOG.md and the store release notes"
+else
+    echo "  FAIL $VER missing from CHANGELOG.md or the store release notes"; fail=1
+fi
+
 echo "== Publication hygiene =="
 if grep -Rni --exclude-dir=.git --exclude='*.pyc' --exclude='*.png' --exclude='*.jpg' 'Sen''dan' "$ROOT"; then
     echo "  FAIL found legacy customer reference"; fail=1
